@@ -510,6 +510,19 @@ function setSubtitle(url) {
         default: true
     }, false);
 
+    // 强制显示字幕
+    // Video.js 即使设置了 default: true，有时也需要手动设置为 showing
+    setTimeout(() => {
+        const textTracks = player.textTracks();
+        for (let i = 0; i < textTracks.length; i++) {
+            if (textTracks[i].kind === 'subtitles' && textTracks[i].label === 'Upload') {
+                textTracks[i].mode = 'showing';
+            } else {
+                textTracks[i].mode = 'disabled';
+            }
+        }
+    }, 100);
+
     showToast('字幕已加载', 'success');
 }
 
