@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { exec } = require('child_process');
 
 const app = express();
 const server = http.createServer(app);
@@ -167,16 +168,64 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     return res.status(400).json({ success: false, error: '没有上传文件' });
   }
 
-  const fileUrl = `/uploads/${req.file.filename}`;
+  const originalPath = req.file.path;
+  const originalName = req.file.originalname;
+  const ext = path.extname(originalName).toLowerCase();
 
-  console.log(`视频上传成功: ${req.file.originalname} -> ${fileUrl}`);
+  // 仅对 MP4, MOV, MKV 进行 faststart 优化
+  // 注意：这里我们统一转为 mp4 容器以确保最佳兼容性
+  if (['.mp4', '.mov', '.mkv'].includes(ext)) {
+    const filenameNoExt = path.basename(req.file.filename, path.extname(req.file.filename));
+    const optimizedFilename = `${filenameNoExt}_optimized.mp4`;
+    const optimizedPath = path.join(uploadsDir, optimizedFilename);
+    const optimizedUrl = `/uploads/${optimizedFilename}`;
 
-  res.json({
-    success: true,
-    url: fileUrl,
-    filename: req.file.originalname,
-    size: req.file.size
-  });
+    console.log(`开始优化视频: ${originalName}...`);
+
+    // 使用 ffmpeg 进行 faststart 优化
+    // -c copy: 不重新编码，只复制流（速度快）
+    // -movflags +faststart: 移动 moov atom 到文件头
+    exec(`ffmpeg -i "${originalPath}" -c copy -movflags +faststart "${optimizedPath}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`优化失败: ${error.message}`);
+        // 优化失败则降级使用原文件
+        const fileUrl = `/uploads/${req.file.filename}`;
+        res.json({
+          success: true,
+          url: fileUrl,
+          filename: originalName,
+          size: req.file.size,
+          optimized: false
+        });
+        return;
+      }
+
+      console.log(`视频优化完成: ${optimizedUrl}`);
+
+      // 删除原文件（可选，为了节省空间）
+      fs.unlink(originalPath, (err) => {
+        if (err) console.error('删除原文件失败:', err);
+      });
+
+      res.json({
+        success: true,
+        url: optimizedUrl,
+        filename: originalName,
+        size: req.file.size, // 注意：这是原大小，优化后可能略有不同
+        optimized: true
+      });
+    });
+  } else {
+    // 其他格式直接返回
+    const fileUrl = `/uploads/${req.file.filename}`;
+    console.log(`视频上传成功 (未优化): ${originalName} -> ${fileUrl}`);
+    res.json({
+      success: true,
+      url: fileUrl,
+      filename: originalName,
+      size: req.file.size
+    });
+  }
 });
 
 // 上传错误处理
