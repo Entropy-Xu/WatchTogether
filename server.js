@@ -38,15 +38,18 @@ const upload = multer({
   storage,
   // 不设置文件大小限制
   fileFilter: (req, file, cb) => {
-    // 允许的视频格式
-    const allowedTypes = /mp4|webm|mkv|avi|mov|m4v|ogg|ogv|flv|wmv|ts/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = file.mimetype.startsWith('video/');
+    // 允许的格式 (视频 + 字幕)
+    const allowedTypes = /mp4|webm|mkv|avi|mov|m4v|ogg|ogv|flv|wmv|ts|srt|ass|ssa|sub|idx/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase().replace('.', ''));
+    // 字幕文件的 mimetype 经常识别不准，所以主要靠扩展名
+    const mimetype = file.mimetype.startsWith('video/') ||
+      file.mimetype.includes('text/') ||
+      file.mimetype.includes('app'); // application/x-subrip etc.
 
-    if (extname || mimetype) {
+    if (extname) { // 主要信赖扩展名
       cb(null, true);
     } else {
-      cb(new Error('只支持视频文件格式'));
+      cb(new Error('不支持的文件格式'));
     }
   }
 });
@@ -91,6 +94,7 @@ class Room {
     this.hostId = null;
     this.hostName = hostName;
     this.videoUrl = '';
+    this.subtitleUrl = null; // 字幕 URL
     this.videoState = {
       isPlaying: false,
       currentTime: 0,
@@ -171,6 +175,49 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
   const originalPath = req.file.path;
   const originalName = req.file.originalname;
   const ext = path.extname(originalName).toLowerCase();
+
+  // 字幕文件处理
+  const subtitleExts = ['.srt', '.ass', '.ssa', '.sub', '.idx'];
+  if (subtitleExts.includes(ext)) {
+    const filenameNoExt = path.basename(req.file.filename, path.extname(req.file.filename));
+    const vttFilename = `${filenameNoExt}.vtt`;
+    const vttPath = path.join(uploadsDir, vttFilename);
+    const vttUrl = `/uploads/${vttFilename}`;
+
+    console.log(`开始转换字幕: ${originalName} -> VTT...`);
+
+    // 使用 ffmpeg 转换为 webvtt
+    exec(`ffmpeg -i "${originalPath}" -f webvtt "${vttPath}"`, (error) => {
+      if (error) {
+        console.error(`字幕转换失败: ${error.message}`);
+        // 失败尝试直接返回原文件 (可能不兼容)
+        res.json({
+          success: true,
+          url: `/uploads/${req.file.filename}`,
+          filename: originalName,
+          isSubtitle: true,
+          converted: false
+        });
+        return;
+      }
+
+      console.log(`字幕转换完成: ${vttUrl}`);
+
+      // 删除原字幕文件
+      fs.unlink(originalPath, (err) => {
+        if (err) console.error('删除原字幕文件失败:', err);
+      });
+
+      res.json({
+        success: true,
+        url: vttUrl,
+        filename: originalName,
+        isSubtitle: true,
+        converted: true
+      });
+    });
+    return; // 结束字幕处理
+  }
 
   // 仅对 MP4, MOV, MKV 进行 faststart 优化
   // 注意：这里我们统一转为 mp4 容器以确保最佳兼容性
@@ -298,6 +345,7 @@ io.on('connection', (socket) => {
       roomId,
       isHost: room.hostId === socket.id,
       videoUrl: room.videoUrl,
+      subtitleUrl: room.subtitleUrl,
       videoState: room.videoState,
       userList: room.getUserList(),
       messages: room.messages.slice(-50) // 发送最近50条消息
@@ -324,6 +372,24 @@ io.on('connection', (socket) => {
     });
 
     console.log(`房间 ${currentRoom} 视频更换为: ${url}`);
+  });
+
+  // 更换字幕
+  socket.on('change-subtitle', ({ url, filename }) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    room.subtitleUrl = url;
+
+    // 广播给房间内所有人
+    io.to(currentRoom).emit('subtitle-changed', {
+      url,
+      filename,
+      changedBy: currentUserName
+    });
+
+    console.log(`房间 ${currentRoom} 字幕更换为: ${filename}`);
   });
 
   // 视频播放控制同步

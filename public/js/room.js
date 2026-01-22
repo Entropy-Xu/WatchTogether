@@ -137,6 +137,13 @@ function initSocket() {
         addSystemMessage(`${changedBy} 更换了视频`);
     });
 
+    // 字幕更换
+    socket.on('subtitle-changed', ({ url, filename, changedBy }) => {
+        setSubtitle(url);
+        showNotification(`${changedBy} 加载了字幕: ${filename}`);
+        addSystemMessage(`${changedBy} 加载了字幕: ${filename}`);
+    });
+
     // 同步播放
     socket.on('sync-play', ({ currentTime, triggeredBy }) => {
         if (!player) return;
@@ -232,6 +239,14 @@ function joinRoom() {
             if (response.videoUrl) {
                 document.getElementById('video-url-input').value = response.videoUrl;
                 loadVideo(response.videoUrl);
+
+                // 加载字幕
+                if (response.subtitleUrl) {
+                    // 延迟加载字幕确保播放器已就绪
+                    setTimeout(() => {
+                        setSubtitle(response.subtitleUrl);
+                    }, 500);
+                }
 
                 // 同步到当前进度
                 setTimeout(() => {
@@ -440,6 +455,25 @@ function initEventListeners() {
         uploadVideo(file);
     });
 
+    // 字幕上传按钮点击
+    document.getElementById('upload-subtitle-btn').addEventListener('click', () => {
+        document.getElementById('subtitle-file-input').click();
+    });
+
+    // 字幕文件选择处理
+    document.getElementById('subtitle-file-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const allowedExtensions = /\.(srt|ass|ssa|sub|idx)$/i;
+        if (!allowedExtensions.test(file.name)) {
+            showToast('请选择字幕文件 (srt, ass, sub, idx)', 'error');
+            return;
+        }
+
+        uploadSubtitle(file);
+    });
+
     // 发送聊天消息
     document.getElementById('chat-form').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -455,8 +489,68 @@ function initEventListeners() {
 }
 
 // ==========================================
-// 视频上传
+// 视频/字幕上传
 // ==========================================
+
+function setSubtitle(url) {
+    if (!player || !url) return;
+
+    // 清除现有字幕
+    const tracks = player.remoteTextTracks();
+    for (let i = tracks.length - 1; i >= 0; i--) {
+        player.removeRemoteTextTrack(tracks[i]);
+    }
+
+    // 添加新字幕
+    player.addRemoteTextTrack({
+        kind: 'subtitles',
+        src: url,
+        label: 'Upload',
+        srclang: 'zh',
+        default: true
+    }, false);
+
+    showToast('字幕已加载', 'success');
+}
+
+function uploadSubtitle(file) {
+    const uploadBtn = document.getElementById('upload-subtitle-btn');
+
+    // 简单 loading 状态
+    const originalText = uploadBtn.querySelector('span').textContent;
+    uploadBtn.disabled = true;
+    uploadBtn.querySelector('span').textContent = '转换中...';
+
+    const formData = new FormData();
+    formData.append('video', file); // 复用 multer 'video' 字段
+
+    fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`字幕 "${data.filename}" 上传成功`, 'success');
+                // 通知服务器更换字幕
+                socket.emit('change-subtitle', {
+                    url: data.url,
+                    filename: data.filename
+                });
+            } else {
+                showToast(data.error || '字幕上传失败', 'error');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            showToast('网络错误，上传失败', 'error');
+        })
+        .finally(() => {
+            uploadBtn.disabled = false;
+            uploadBtn.querySelector('span').textContent = originalText;
+            document.getElementById('subtitle-file-input').value = '';
+        });
+}
 
 function uploadVideo(file) {
     const uploadBtn = document.getElementById('upload-video-btn');
