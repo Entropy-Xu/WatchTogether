@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>放映室 - 在线电影放映室</title>
+  <meta name="description" content="与朋友同步观看视频">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+    rel="stylesheet">
+  <!-- Video.js -->
+  <link href="https://vjs.zencdn.net/8.6.1/video-js.css" rel="stylesheet">
+</head>
+
+<body class="room-page">
+  <div class="room-container">
+    <!-- 顶部导航栏 -->
+    <header class="room-header">
+      <div class="header-left">
+        <a href="/" class="back-btn" title="返回首页">
+          <i class="fa-solid fa-arrow-left"></i>
+        </a>
+        <div class="room-info">
+          <i class="fa-solid fa-film room-icon"></i>
+          <span class="room-title">放映室</span>
+          <span class="room-id-badge" id="room-id-display">----</span>
+          <button class="copy-btn" id="copy-room-id" title="复制房间号">
+            <i class="fa-solid fa-copy"></i>
+          </button>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="sync-status" id="sync-status">
+          <span class="sync-dot"></span>
+          <span class="sync-text">已同步</span>
+        </div>
+        <div class="user-count" id="user-count">
+          <i class="fa-solid fa-users user-icon"></i>
+          <span class="count">1</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主内容区域 -->
+    <div class="room-main">
+      <!-- 视频播放区域 -->
+      <div class="video-section">
+        <!-- 视频源输入 -->
+        <div class="video-url-bar">
+          <div class="url-input-wrapper">
+            <i class="fa-solid fa-link url-icon"></i>
+            <input type="url" id="video-url-input" placeholder="粘贴视频链接 (支持 MP4, HLS, DASH 等格式)" autocomplete="off">
+            <button id="load-video-btn" class="load-btn">
+              <span>加载视频</span>
+            </button>
+            <span class="divider-text">或</span>
+            <button id="upload-video-btn" class="upload-btn" type="button">
+              <i class="fa-solid fa-file-upload upload-icon"></i>
+              <span>上传文件</span>
+            </button>
+            <input type="file" id="video-file-input" accept="video/*,.mkv,.avi,.flv,.wmv,.ts" style="display: none;">
+          </div>
+          <!-- 上传进度条 -->
+          <div class="upload-progress" id="upload-progress" style="display: none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <span class="progress-text" id="progress-text">上传中... 0%</span>
+          </div>
+        </div>
+
+        <!-- 视频播放器 -->
+        <div class="video-wrapper">
+          <div class="video-placeholder" id="video-placeholder">
+            <div class="placeholder-content">
+              <i class="fa-solid fa-file-video placeholder-icon"></i>
+              <p>粘贴视频链接开始观看</p>
+              <span class="placeholder-hint">支持 MP4, WebM, HLS (m3u8), DASH 等格式</span>
+            </div>
+          </div>
+          <video id="video-player" class="video-js vjs-big-play-centered vjs-theme-cinema" controls preload="auto"
+            style="display: none;">
+            <p class="vjs-no-js">
+              请启用 JavaScript 并使用支持 HTML5 视频的浏览器
+            </p>
+          </video>
+        </div>
+
+        <!-- 视频控制提示 -->
+        <div class="video-controls-hint" id="video-hint" style="display: none;">
+          <i class="fa-solid fa-lightbulb hint-icon"></i>
+          <span class="hint-text">你的播放操作会同步给房间内所有人</span>
+        </div>
+      </div>
+
+      <!-- 侧边栏 -->
+      <aside class="sidebar">
+        <!-- 用户列表 -->
+        <div class="sidebar-section users-section">
+          <div class="section-header">
+            <i class="fa-solid fa-users section-icon"></i>
+            <h3>在线用户</h3>
+          </div>
+          <ul class="user-list" id="user-list">
+            <!-- 用户列表将通过 JS 动态填充 -->
+          </ul>
+        </div>
+
+        <!-- 聊天区域 -->
+        <div class="sidebar-section chat-section">
+          <div class="section-header">
+            <i class="fa-solid fa-comments section-icon"></i>
+            <h3>聊天</h3>
+          </div>
+          <div class="chat-messages" id="chat-messages">
+            <div class="chat-welcome">
+              <p>欢迎来到放映室！</p>
+              <p class="welcome-hint">在这里和朋友边看边聊 😊</p>
+            </div>
+          </div>
+          <form class="chat-input-form" id="chat-form">
+            <input type="text" id="chat-input" placeholder="发送消息..." maxlength="500" autocomplete="off">
+            <button type="submit" class="send-btn">
+              <span>发送</span>
+            </button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- 系统通知 -->
+  <div id="notification" class="notification"></div>
+
+  <!-- Toast 提示 -->
+  <div id="toast" class="toast"></div>
+
+  <!-- 连接状态遮罩 -->
+  <div class="connection-overlay" id="connection-overlay">
+    <div class="connection-modal">
+      <div class="loading-spinner"></div>
+      <p id="connection-status-text">正在连接...</p>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
+  <script src="js/room.js"></script>
+</body>
+
+</html>

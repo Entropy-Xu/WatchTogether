@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>在线电影放映室 - 与朋友一起看电影</title>
+  <meta name="description" content="创建或加入放映室，与朋友同步观看视频，享受共同观影的乐趣">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+    rel="stylesheet">
+</head>
+
+<body>
+  <div class="bg-animation">
+    <div class="bg-gradient"></div>
+    <div class="bg-particles"></div>
+  </div>
+
+  <main class="home-container">
+    <header class="hero">
+      <div class="logo">
+        <i class="fa-solid fa-film logo-icon"></i>
+        <h1>在线放映室</h1>
+      </div>
+      <p class="tagline">与朋友一起，享受同步观影的乐趣</p>
+    </header>
+
+    <div class="card-container">
+      <!-- 创建房间卡片 -->
+      <div class="card create-card">
+        <div class="card-header">
+          <i class="fa-solid fa-wand-magic-sparkles card-icon"></i>
+          <h2>创建放映室</h2>
+        </div>
+        <p class="card-desc">创建一个新的放映室，邀请朋友一起观看</p>
+        <form id="create-form" class="form">
+          <div class="input-group">
+            <label for="create-username">你的昵称</label>
+            <input type="text" id="create-username" placeholder="输入昵称..." maxlength="20" required autocomplete="off">
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <span class="btn-text">创建放映室</span>
+            <i class="fa-solid fa-arrow-right btn-icon"></i>
+          </button>
+        </form>
+      </div>
+
+      <!-- 分隔线 -->
+      <div class="divider">
+        <span>或者</span>
+      </div>
+
+      <!-- 加入房间卡片 -->
+      <div class="card join-card">
+        <div class="card-header">
+          <i class="fa-solid fa-ticket card-icon"></i>
+          <h2>加入放映室</h2>
+        </div>
+        <p class="card-desc">输入房间号，加入朋友的放映室</p>
+        <form id="join-form" class="form">
+          <div class="input-group">
+            <label for="join-username">你的昵称</label>
+            <input type="text" id="join-username" placeholder="输入昵称..." maxlength="20" required autocomplete="off">
+          </div>
+          <div class="input-group">
+            <label for="room-id">房间号</label>
+            <input type="text" id="room-id" placeholder="输入8位房间号..." maxlength="8" required autocomplete="off"
+              style="text-transform: uppercase;">
+          </div>
+          <button type="submit" class="btn btn-secondary">
+            <span class="btn-text">加入放映室</span>
+            <i class="fa-solid fa-arrow-right btn-icon"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <footer class="home-footer">
+      <div class="features">
+        <div class="feature">
+          <i class="fa-solid fa-rotate feature-icon"></i>
+          <span>实时同步</span>
+        </div>
+        <div class="feature">
+          <i class="fa-solid fa-comments feature-icon"></i>
+          <span>边看边聊</span>
+        </div>
+        <div class="feature">
+          <i class="fa-solid fa-globe feature-icon"></i>
+          <span>支持各种视频源</span>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Toast 提示 -->
+  <div id="toast" class="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>

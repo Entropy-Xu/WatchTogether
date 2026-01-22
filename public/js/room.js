@@ -1,0 +1,614 @@
+/**
+ * 在线电影放映室 - 放映室逻辑
+ */
+
+// ==========================================
+// 全局变量
+// ==========================================
+
+let socket = null;
+let player = null;
+let roomId = null;
+let userName = null;
+let isHost = false;
+let isSyncing = false; // 防止同步循环
+
+// ==========================================
+// 工具函数
+// ==========================================
+
+function showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = `toast show ${type}`;
+
+    setTimeout(() => {
+        toast.className = 'toast';
+    }, 3000);
+}
+
+function showNotification(message) {
+    const notification = document.getElementById('notification');
+    notification.textContent = message;
+    notification.className = 'notification show';
+
+    setTimeout(() => {
+        notification.className = 'notification';
+    }, 4000);
+}
+
+function formatTime(timestamp) {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function getInitial(name) {
+    return name ? name.charAt(0).toUpperCase() : '?';
+}
+
+function showConnectionOverlay(show, text = '正在连接...') {
+    const overlay = document.getElementById('connection-overlay');
+    const statusText = document.getElementById('connection-status-text');
+
+    statusText.textContent = text;
+    overlay.className = show ? 'connection-overlay show' : 'connection-overlay';
+}
+
+function updateSyncStatus(status, text) {
+    const syncStatus = document.getElementById('sync-status');
+    const syncText = syncStatus.querySelector('.sync-text');
+
+    syncStatus.className = `sync-status ${status}`;
+    syncText.textContent = text;
+}
+
+// ==========================================
+// 初始化
+// ==========================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    // 从 URL 和 sessionStorage 获取信息
+    const urlParams = new URLSearchParams(window.location.search);
+    roomId = urlParams.get('id') || sessionStorage.getItem('roomId');
+    userName = sessionStorage.getItem('userName');
+    isHost = sessionStorage.getItem('isHost') === 'true';
+
+    if (!roomId || !userName) {
+        alert('请先从首页进入放映室');
+        window.location.href = '/';
+        return;
+    }
+
+    // 显示房间号
+    document.getElementById('room-id-display').textContent = roomId;
+
+    // 初始化
+    initSocket();
+    initVideoPlayer();
+    initEventListeners();
+});
+
+// ==========================================
+// Socket.io 连接
+// ==========================================
+
+function initSocket() {
+    showConnectionOverlay(true, '正在连接服务器...');
+
+    socket = io();
+
+    socket.on('connect', () => {
+        console.log('Socket 已连接');
+        joinRoom();
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Socket 已断开');
+        updateSyncStatus('error', '已断开');
+        showNotification('连接已断开，正在重连...');
+    });
+
+    socket.on('reconnect', () => {
+        console.log('Socket 已重连');
+        joinRoom();
+    });
+
+    // 用户加入
+    socket.on('user-joined', ({ userName: name, userList }) => {
+        showNotification(`${name} 加入了放映室`);
+        updateUserList(userList);
+        addSystemMessage(`${name} 加入了放映室`);
+    });
+
+    // 用户离开
+    socket.on('user-left', ({ userName: name, userList }) => {
+        showNotification(`${name} 离开了放映室`);
+        updateUserList(userList);
+        addSystemMessage(`${name} 离开了放映室`);
+    });
+
+    // 视频更换
+    socket.on('video-changed', ({ url, changedBy }) => {
+        loadVideo(url);
+        showNotification(`${changedBy} 更换了视频`);
+        addSystemMessage(`${changedBy} 更换了视频`);
+    });
+
+    // 同步播放
+    socket.on('sync-play', ({ currentTime, triggeredBy }) => {
+        if (!player) return;
+
+        isSyncing = true;
+        updateSyncStatus('syncing', '同步中...');
+
+        const timeDiff = Math.abs(player.currentTime() - currentTime);
+        if (timeDiff > 1) {
+            player.currentTime(currentTime);
+        }
+        player.play();
+
+        setTimeout(() => {
+            isSyncing = false;
+            updateSyncStatus('', '已同步');
+        }, 500);
+
+        showNotification(`${triggeredBy} 播放了视频`);
+    });
+
+    // 同步暂停
+    socket.on('sync-pause', ({ currentTime, triggeredBy }) => {
+        if (!player) return;
+
+        isSyncing = true;
+        updateSyncStatus('syncing', '同步中...');
+
+        player.currentTime(currentTime);
+        player.pause();
+
+        setTimeout(() => {
+            isSyncing = false;
+            updateSyncStatus('', '已同步');
+        }, 500);
+
+        showNotification(`${triggeredBy} 暂停了视频`);
+    });
+
+    // 同步跳转
+    socket.on('sync-seek', ({ currentTime, triggeredBy }) => {
+        if (!player) return;
+
+        isSyncing = true;
+        updateSyncStatus('syncing', '同步中...');
+
+        player.currentTime(currentTime);
+
+        setTimeout(() => {
+            isSyncing = false;
+            updateSyncStatus('', '已同步');
+        }, 500);
+
+        showNotification(`${triggeredBy} 调整了进度`);
+    });
+
+    // 强制同步
+    socket.on('force-sync', ({ videoUrl, videoState }) => {
+        if (videoUrl) {
+            loadVideo(videoUrl);
+
+            setTimeout(() => {
+                if (player && videoState) {
+                    player.currentTime(videoState.currentTime);
+                    if (videoState.isPlaying) {
+                        player.play();
+                    }
+                }
+            }, 1000);
+        }
+    });
+
+    // 聊天消息
+    socket.on('new-message', (message) => {
+        addChatMessage(message);
+    });
+}
+
+function joinRoom() {
+    showConnectionOverlay(true, '正在加入放映室...');
+
+    socket.emit('join-room', { roomId, userName }, (response) => {
+        if (response.success) {
+            showConnectionOverlay(false);
+            updateSyncStatus('', '已同步');
+            updateUserList(response.userList);
+
+            // 加载现有视频
+            if (response.videoUrl) {
+                document.getElementById('video-url-input').value = response.videoUrl;
+                loadVideo(response.videoUrl);
+
+                // 同步到当前进度
+                setTimeout(() => {
+                    if (player && response.videoState) {
+                        player.currentTime(response.videoState.currentTime);
+                        if (response.videoState.isPlaying) {
+                            player.play();
+                        }
+                    }
+                }, 1000);
+            }
+
+            // 加载聊天记录
+            if (response.messages && response.messages.length > 0) {
+                response.messages.forEach(msg => addChatMessage(msg, false));
+            }
+
+            showToast(`已加入放映室 ${roomId}`, 'success');
+        } else {
+            showConnectionOverlay(false);
+            alert(response.error || '加入房间失败');
+            window.location.href = '/';
+        }
+    });
+}
+
+// ==========================================
+// Video.js 播放器
+// ==========================================
+
+function initVideoPlayer() {
+    const videoElement = document.getElementById('video-player');
+
+    player = videojs(videoElement, {
+        controls: true,
+        autoplay: false,
+        preload: 'auto',
+        fluid: false,
+        responsive: true,
+        playbackRates: [0.5, 1, 1.25, 1.5, 2],
+        html5: {
+            vhs: {
+                overrideNative: true
+            },
+            nativeAudioTracks: false,
+            nativeVideoTracks: false
+        }
+    });
+
+    // 播放事件
+    player.on('play', () => {
+        if (isSyncing) return;
+        socket.emit('video-play', { currentTime: player.currentTime() });
+    });
+
+    // 暂停事件
+    player.on('pause', () => {
+        if (isSyncing) return;
+        // 排除视频结束时的暂停
+        if (player.ended()) return;
+        socket.emit('video-pause', { currentTime: player.currentTime() });
+    });
+
+    // 跳转事件
+    player.on('seeked', () => {
+        if (isSyncing) return;
+        socket.emit('video-seek', { currentTime: player.currentTime() });
+    });
+
+    // 错误处理
+    player.on('error', () => {
+        showToast('视频加载失败，请检查链接是否有效', 'error');
+    });
+}
+
+function loadVideo(url) {
+    if (!player || !url) return;
+
+    // 隐藏占位符，显示播放器
+    document.getElementById('video-placeholder').style.display = 'none';
+    document.getElementById('video-player').style.display = 'block';
+    document.getElementById('video-hint').style.display = 'flex';
+
+    // 根据 URL 扩展名判断视频类型
+    const urlLower = url.toLowerCase();
+    let type = 'video/mp4'; // 默认
+
+    // MIME 类型映射
+    const mimeMap = {
+        '.mp4': 'video/mp4',
+        '.m4v': 'video/mp4',
+        '.mov': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogg': 'video/ogg',
+        '.ogv': 'video/ogg',
+        '.mkv': 'video/mp4', // MKV 尝试用 mp4 类型播放（如果编码兼容）
+        '.avi': 'video/mp4',
+        '.flv': 'video/mp4',
+        '.wmv': 'video/mp4',
+        '.m3u8': 'application/x-mpegURL',
+        '.mpd': 'application/dash+xml',
+        '.ts': 'video/mp2t'
+    };
+
+    // 查找匹配的扩展名
+    for (const [ext, mime] of Object.entries(mimeMap)) {
+        if (urlLower.includes(ext)) {
+            type = mime;
+            break;
+        }
+    }
+
+    isSyncing = true;
+
+    // 先重置播放器
+    player.reset();
+
+    player.src({
+        src: url,
+        type: type
+    });
+
+    // 加载并准备播放
+    player.load();
+
+    // 添加加载事件监听
+    player.one('loadedmetadata', () => {
+        console.log('视频元数据已加载');
+        updateSyncStatus('', '已同步');
+    });
+
+    player.one('error', (e) => {
+        console.error('视频加载错误:', player.error());
+        showToast('视频加载失败，可能是格式不支持或编码不兼容', 'error');
+    });
+
+    setTimeout(() => {
+        isSyncing = false;
+    }, 1000);
+}
+
+// ==========================================
+// UI 事件监听
+// ==========================================
+
+function initEventListeners() {
+    // 复制房间号
+    document.getElementById('copy-room-id').addEventListener('click', () => {
+        navigator.clipboard.writeText(roomId).then(() => {
+            showToast('房间号已复制', 'success');
+        }).catch(() => {
+            // 降级方案
+            const input = document.createElement('input');
+            input.value = roomId;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            showToast('房间号已复制', 'success');
+        });
+    });
+
+    // 加载视频
+    document.getElementById('load-video-btn').addEventListener('click', () => {
+        const url = document.getElementById('video-url-input').value.trim();
+        if (!url) {
+            showToast('请输入视频链接', 'error');
+            return;
+        }
+
+        // 简单的 URL 验证
+        try {
+            new URL(url);
+        } catch {
+            showToast('请输入有效的视频链接', 'error');
+            return;
+        }
+
+        socket.emit('change-video', { url });
+    });
+
+    // 回车加载视频
+    document.getElementById('video-url-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            document.getElementById('load-video-btn').click();
+        }
+    });
+
+    // 文件上传按钮点击
+    document.getElementById('upload-video-btn').addEventListener('click', () => {
+        document.getElementById('video-file-input').click();
+    });
+
+    // 文件选择处理
+    document.getElementById('video-file-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // 使用扩展名检查文件类型（因为 MKV 等格式的 MIME 类型可能无法识别）
+        const allowedExtensions = /\.(mp4|m4v|mov|webm|ogg|ogv|mkv|avi|flv|wmv|ts)$/i;
+        if (!allowedExtensions.test(file.name) && !file.type.startsWith('video/')) {
+            showToast('请选择视频文件 (支持 MP4, MKV, FLV, AVI, MOV 等)', 'error');
+            return;
+        }
+
+        uploadVideo(file);
+    });
+
+    // 发送聊天消息
+    document.getElementById('chat-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+
+        if (!text) return;
+
+        socket.emit('chat-message', { text });
+        input.value = '';
+    });
+}
+
+// ==========================================
+// 视频上传
+// ==========================================
+
+function uploadVideo(file) {
+    const uploadBtn = document.getElementById('upload-video-btn');
+    const uploadProgress = document.getElementById('upload-progress');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+
+    // 禁用上传按钮
+    uploadBtn.disabled = true;
+    uploadBtn.querySelector('span:last-child').textContent = '上传中...';
+
+    // 显示进度条
+    uploadProgress.style.display = 'flex';
+    progressFill.style.width = '0%';
+    progressText.textContent = '准备上传...';
+
+    const formData = new FormData();
+    formData.append('video', file);
+
+    const xhr = new XMLHttpRequest();
+
+    // 上传进度
+    xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            progressFill.style.width = `${percent}%`;
+            progressText.textContent = `上传中... ${percent}%`;
+        }
+    });
+
+    // 上传完成
+    xhr.addEventListener('load', () => {
+        if (xhr.status === 200) {
+            try {
+                const response = JSON.parse(xhr.responseText);
+                if (response.success) {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '上传完成！';
+                    showToast(`视频 "${response.filename}" 上传成功`, 'success');
+
+                    // 通知所有人更换视频
+                    socket.emit('change-video', { url: response.url });
+
+                    // 隐藏进度条
+                    setTimeout(() => {
+                        uploadProgress.style.display = 'none';
+                    }, 2000);
+                } else {
+                    showToast(response.error || '上传失败', 'error');
+                    uploadProgress.style.display = 'none';
+                }
+            } catch {
+                showToast('上传响应解析失败', 'error');
+                uploadProgress.style.display = 'none';
+            }
+        } else {
+            showToast('上传失败，请重试', 'error');
+            uploadProgress.style.display = 'none';
+        }
+
+        // 恢复按钮状态
+        uploadBtn.disabled = false;
+        uploadBtn.querySelector('span:last-child').textContent = '上传文件';
+    });
+
+    // 上传错误
+    xhr.addEventListener('error', () => {
+        showToast('网络错误，上传失败', 'error');
+        uploadProgress.style.display = 'none';
+        uploadBtn.disabled = false;
+        uploadBtn.querySelector('span:last-child').textContent = '上传文件';
+    });
+
+    // 发送请求
+    xhr.open('POST', '/api/upload');
+    xhr.send(formData);
+}
+
+// ==========================================
+// 用户列表
+// ==========================================
+
+function updateUserList(users) {
+    const userList = document.getElementById('user-list');
+    const userCount = document.getElementById('user-count').querySelector('.count');
+
+    userCount.textContent = users.length;
+
+    userList.innerHTML = users.map(user => `
+    <li>
+      <div class="user-avatar">${getInitial(user.name)}</div>
+      <span class="user-name">${escapeHtml(user.name)}</span>
+      ${user.isHost ? '<span class="host-badge">房主</span>' : ''}
+    </li>
+  `).join('');
+}
+
+// ==========================================
+// 聊天功能
+// ==========================================
+
+function addChatMessage(message, scroll = true) {
+    const chatMessages = document.getElementById('chat-messages');
+
+    // 移除欢迎消息
+    const welcome = chatMessages.querySelector('.chat-welcome');
+    if (welcome) {
+        welcome.remove();
+    }
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'chat-message';
+    messageEl.innerHTML = `
+    <div class="message-header">
+      <span class="message-author">${escapeHtml(message.userName)}</span>
+      <span class="message-time">${formatTime(message.timestamp)}</span>
+    </div>
+    <div class="message-text">${escapeHtml(message.text)}</div>
+  `;
+
+    chatMessages.appendChild(messageEl);
+
+    if (scroll) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}
+
+function addSystemMessage(text) {
+    const chatMessages = document.getElementById('chat-messages');
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'system-message';
+    messageEl.textContent = text;
+
+    chatMessages.appendChild(messageEl);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ==========================================
+// 安全函数
+// ==========================================
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ==========================================
+// 页面离开前清理
+// ==========================================
+
+window.addEventListener('beforeunload', () => {
+    if (socket) {
+        socket.disconnect();
+    }
+    if (player) {
+        player.dispose();
+    }
+});
+
+console.log('🎬 放映室已加载');

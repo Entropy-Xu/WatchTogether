@@ -1,0 +1,31 @@
+{
+  "name": "online-media-player",
+  "version": "1.0.0",
+  "description": "在线电影放映室 - 与朋友同步观看视频",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "watch-party",
+    "sync-video",
+    "socket.io",
+    "video-streaming"
+  ],
+  "author": "",
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/online-media-player.git"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^2.0.2",
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
