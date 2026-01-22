@@ -76,6 +76,7 @@
 
         <!-- 视频播放器 -->
         <div class="video-wrapper">
+          <div id="danmaku-container" class="danmaku-container"></div>
           <div class="video-placeholder" id="video-placeholder">
             <div class="placeholder-content">
               <i class="fa-solid fa-file-video placeholder-icon"></i>
@@ -91,10 +92,16 @@
           </video>
         </div>
 
-        <!-- 视频控制提示 -->
+        <!-- 视频控制提示 & 弹幕开关 -->
         <div class="video-controls-hint" id="video-hint" style="display: none;">
-          <i class="fa-solid fa-lightbulb hint-icon"></i>
-          <span class="hint-text">你的播放操作会同步给房间内所有人</span>
+          <div class="hint-left">
+            <i class="fa-solid fa-lightbulb hint-icon"></i>
+            <span class="hint-text">你的播放操作会同步给房间内所有人</span>
+          </div>
+          <button id="toggle-danmaku-btn" class="toggle-btn active" title="开启/关闭弹幕">
+            <i class="fa-solid fa-comment-dots"></i>
+            <span>弹幕: 开</span>
+          </button>
         </div>
       </div>
 

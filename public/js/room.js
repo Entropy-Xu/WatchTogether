@@ -12,6 +12,8 @@ let roomId = null;
 let userName = null;
 let isHost = false;
 let isSyncing = false; // 防止同步循环
+let danmakuEnabled = true; // 弹幕开关
+let danmakuSpeed = 10; // 弹幕速度 (秒)
 
 // ==========================================
 // 工具函数
@@ -86,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initSocket();
     initVideoPlayer();
     initEventListeners();
+    initDanmakuControl(); // Danmaku
 });
 
 // ==========================================
@@ -209,6 +212,10 @@ function initSocket() {
     // 聊天消息
     socket.on('new-message', (message) => {
         addChatMessage(message);
+        // 发送弹幕
+        if (typeof danmakuManager !== 'undefined') {
+            danmakuManager.add(message.text);
+        }
     });
 }
 
@@ -586,6 +593,82 @@ function addSystemMessage(text) {
 
     chatMessages.appendChild(messageEl);
     chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ==========================================
+// 弹幕功能
+// ==========================================
+
+class DanmakuManager {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.tracks = [0, 1, 2, 3, 4]; // 轨道数
+        this.trackHeight = 40; // 轨道高度
+    }
+
+    add(text, color = '#ffffff') {
+        if (!danmakuEnabled || !this.container) return;
+
+        const item = document.createElement('div');
+        item.className = 'danmaku-item';
+        item.textContent = text;
+        item.style.color = color;
+
+        // 随机分配轨道
+        const track = Math.floor(Math.random() * this.tracks.length);
+        const top = track * this.trackHeight + 20; // 20px padding
+        item.style.top = `${top}px`;
+
+        // 设置初始位置
+        item.style.left = '100%';
+        item.style.transform = 'translateX(0)';
+
+        this.container.appendChild(item);
+
+        // 动画
+        const duration = 8000 + Math.random() * 4000; // 8-12秒
+
+        // 使用 Web Animations API
+        const animation = item.animate([
+            { transform: 'translateX(0)', left: '100%' },
+            { transform: 'translateX(-100%)', left: '-100px' } // 移出屏幕
+        ], {
+            duration: duration,
+            easing: 'linear'
+        });
+
+        animation.onfinish = () => {
+            item.remove();
+        };
+    }
+
+    clear() {
+        if (this.container) {
+            this.container.innerHTML = '';
+        }
+    }
+}
+
+const danmakuManager = new DanmakuManager('danmaku-container');
+
+// 初始化弹幕开关
+function initDanmakuControl() {
+    const btn = document.getElementById('toggle-danmaku-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+        danmakuEnabled = !danmakuEnabled;
+
+        if (danmakuEnabled) {
+            btn.classList.add('active');
+            btn.querySelector('span').textContent = '弹幕: 开';
+            document.getElementById('danmaku-container').style.opacity = '1';
+        } else {
+            btn.classList.remove('active');
+            btn.querySelector('span').textContent = '弹幕: 关';
+            document.getElementById('danmaku-container').style.opacity = '0';
+        }
+    });
 }
 
 // ==========================================
