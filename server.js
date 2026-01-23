@@ -233,24 +233,36 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
     console.log(`开始 HLS 转换: ${originalName}...`);
 
-    // 使用 ffprobe 检测音轨数量
-    exec(`ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "${originalPath}"`, (probeErr, probeOut) => {
-      let audioTracks = [];
-      if (!probeErr && probeOut.trim()) {
-        audioTracks = probeOut.trim().split('\n').filter(Boolean);
+    // 使用 ffprobe 检测音轨数量 (JSON 输出更可靠)
+    const probeCmd = `ffprobe -v error -select_streams a -show_entries stream=index,codec_name -of json "${originalPath}"`;
+    exec(probeCmd, (probeErr, probeOut) => {
+      let numAudio = 1;
+      try {
+        if (!probeErr && probeOut.trim()) {
+          const probeData = JSON.parse(probeOut);
+          if (probeData.streams && probeData.streams.length > 0) {
+            numAudio = probeData.streams.length;
+            console.log('检测到的音轨:', probeData.streams.map((s, i) => `音轨${i + 1}: ${s.codec_name}`).join(', '));
+          }
+        }
+      } catch (parseErr) {
+        console.error('ffprobe 解析失败:', parseErr.message);
       }
-      const numAudio = Math.max(audioTracks.length, 1);
 
       console.log(`检测到 ${numAudio} 个音轨`);
 
-      // 构建 FFmpeg 命令 (性能优化版)
-      // -threads 0: 使用所有 CPU 核心
-      // -c:v copy: 视频流直接复制 (无需重编码)
-      // -c:a aac -b:a 192k: 音频转 AAC, 192k 码率
-      // -ac 2: 立体声输出 (加速编码)
-      // -hls_time 6: 每个片段 6 秒 (更细粒度)
+      // 构建 FFmpeg 命令 (多核优化版 - 32核服务器)
+      // -threads 0: 全局线程数自动最大化
+      // -c:v libx264: 使用 x264 编码器 (支持多线程)
+      // -preset fast: 快速预设 (平衡速度与质量)
+      // -crf 23: 质量控制 (18-28, 越小质量越好)
+      // -x264-params: x264 多线程参数
+      //   threads=16: 编码线程数
+      //   sliced-threads=1: 启用切片线程
+      //   lookahead_threads=4: 预读线程
+      // -c:a aac -b:a 192k: 音频转 AAC
+      // -hls_time 4: 每个片段 4 秒
       // -hls_list_size 0: 完整播放列表
-      // -hls_segment_type mpegts: 高效分段
 
       let mapArgs = '-map 0:v:0';
       let varStreamMap = 'v:0,agroup:audio';
@@ -260,12 +272,14 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:Audio${i + 1}`;
       }
 
-      const ffmpegCmd = `ffmpeg -y -i "${originalPath}" ${mapArgs} ` +
-        `-c:v copy ` +
+      // 多核优化参数
+      const x264Params = 'threads=16:sliced-threads=1:lookahead_threads=4';
+
+      const ffmpegCmd = `ffmpeg -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
+        `-c:v libx264 -preset fast -crf 23 -x264opts ${x264Params} ` +
         `-c:a aac -b:a 192k -ac 2 ` +
-        `-threads 0 ` +
         `-f hls ` +
-        `-hls_time 6 ` +
+        `-hls_time 4 ` +
         `-hls_list_size 0 ` +
         `-hls_segment_type mpegts ` +
         `-hls_flags independent_segments ` +
