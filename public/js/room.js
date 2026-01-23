@@ -701,6 +701,7 @@ function uploadVideo(file) {
     const uploadProgress = document.getElementById('upload-progress');
     const progressFill = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
+    const transcodeOverlay = document.getElementById('transcode-overlay');
 
     // 禁用上传按钮
     uploadBtn.disabled = true;
@@ -722,17 +723,26 @@ function uploadVideo(file) {
             const percent = Math.round((e.loaded / e.total) * 100);
             progressFill.style.width = `${percent}%`;
             progressText.textContent = `上传中... ${percent}%`;
+
+            // 上传完成后显示转码提示
+            if (percent === 100) {
+                progressText.textContent = '上传完成，等待服务器处理...';
+                transcodeOverlay.style.display = 'flex';
+            }
         }
     });
 
     // 上传完成
     xhr.addEventListener('load', () => {
+        // 隐藏转码提示
+        transcodeOverlay.style.display = 'none';
+
         if (xhr.status === 200) {
             try {
                 const response = JSON.parse(xhr.responseText);
                 if (response.success) {
                     progressFill.style.width = '100%';
-                    progressText.textContent = '上传完成！';
+                    progressText.textContent = '处理完成！';
                     showToast(`视频 "${response.filename}" 上传成功`, 'success');
 
                     // 通知所有人更换视频
@@ -764,6 +774,7 @@ function uploadVideo(file) {
     xhr.addEventListener('error', () => {
         showToast('网络错误，上传失败', 'error');
         uploadProgress.style.display = 'none';
+        transcodeOverlay.style.display = 'none';
         uploadBtn.disabled = false;
         uploadBtn.querySelector('span:last-child').textContent = '上传文件';
     });

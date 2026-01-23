@@ -1471,3 +1471,33 @@ ul {
   display: flex;
   justify-content: center;
 }
+
+/* 转码进度提示样式 */
+.transcode-overlay {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2));
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-md);
+  margin-top: 0.5rem;
+}
+
+.transcode-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid var(--primary-light);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.transcode-text {
+  color: var(--primary-light);
+  font-size: 0.9rem;
+}

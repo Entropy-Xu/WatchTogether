@@ -243,12 +243,14 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
       console.log(`检测到 ${numAudio} 个音轨`);
 
-      // 构建 FFmpeg 命令
+      // 构建 FFmpeg 命令 (性能优化版)
       // -threads 0: 使用所有 CPU 核心
       // -c:v copy: 视频流直接复制 (无需重编码)
-      // -c:a aac: 音频转 AAC (HLS 兼容)
-      // -hls_time 10: 每个片段 10 秒
+      // -c:a aac -b:a 192k: 音频转 AAC, 192k 码率
+      // -ac 2: 立体声输出 (加速编码)
+      // -hls_time 6: 每个片段 6 秒 (更细粒度)
       // -hls_list_size 0: 完整播放列表
+      // -hls_segment_type mpegts: 高效分段
 
       let mapArgs = '-map 0:v:0';
       let varStreamMap = 'v:0,agroup:audio';
@@ -258,13 +260,16 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:Audio${i + 1}`;
       }
 
-      const ffmpegCmd = `ffmpeg -i "${originalPath}" ${mapArgs} ` +
-        `-c:v copy -c:a aac ` +
+      const ffmpegCmd = `ffmpeg -y -i "${originalPath}" ${mapArgs} ` +
+        `-c:v copy ` +
+        `-c:a aac -b:a 192k -ac 2 ` +
         `-threads 0 ` +
         `-f hls ` +
-        `-hls_time 10 ` +
+        `-hls_time 6 ` +
         `-hls_list_size 0 ` +
-        `-hls_segment_filename "${hlsDir}/segment_%v_%03d.ts" ` +
+        `-hls_segment_type mpegts ` +
+        `-hls_flags independent_segments ` +
+        `-hls_segment_filename "${hlsDir}/seg_%v_%04d.ts" ` +
         `-master_pl_name master.m3u8 ` +
         `-var_stream_map "${varStreamMap}" ` +
         `"${hlsDir}/stream_%v.m3u8"`;
