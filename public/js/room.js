@@ -452,6 +452,11 @@ function loadVideo(url, startTime = 0, autoPlay = false) {
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
             console.log('HLS 清单已解析，音轨数量:', hls.audioTracks.length);
 
+            // 创建音轨选择器 UI
+            if (hls.audioTracks.length > 1) {
+                createAudioTrackSelector(hls);
+            }
+
             if (startTime > 0) {
                 player.currentTime(startTime);
             }
@@ -941,6 +946,72 @@ function initDanmakuControl() {
 
 // ==========================================
 // 安全函数
+// ==========================================
+
+// ==========================================
+// 音轨选择器 (HLS.js)
+// ==========================================
+
+function createAudioTrackSelector(hls) {
+    // 移除旧的选择器
+    const oldSelector = document.querySelector('.audio-track-selector');
+    if (oldSelector) oldSelector.remove();
+
+    const controlBar = player.controlBar.el();
+
+    // 创建音轨按钮容器
+    const container = document.createElement('div');
+    container.className = 'vjs-menu-button vjs-menu-button-popup vjs-control vjs-button audio-track-selector';
+
+    // 按钮
+    const button = document.createElement('button');
+    button.className = 'vjs-menu-button vjs-button';
+    button.type = 'button';
+    button.title = '音轨选择';
+    button.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+
+    // 菜单
+    const menu = document.createElement('div');
+    menu.className = 'vjs-menu audio-track-menu';
+
+    const menuContent = document.createElement('ul');
+    menuContent.className = 'vjs-menu-content';
+
+    // 添加音轨选项
+    hls.audioTracks.forEach((track, index) => {
+        const item = document.createElement('li');
+        item.className = 'vjs-menu-item' + (index === hls.audioTrack ? ' vjs-selected' : '');
+        item.textContent = track.name || `音轨 ${index + 1}`;
+        item.dataset.index = index;
+
+        item.addEventListener('click', () => {
+            hls.audioTrack = index;
+            // 更新选中状态
+            menuContent.querySelectorAll('.vjs-menu-item').forEach(el => el.classList.remove('vjs-selected'));
+            item.classList.add('vjs-selected');
+            showToast(`已切换到: ${track.name || '音轨 ' + (index + 1)}`, 'success');
+        });
+
+        menuContent.appendChild(item);
+    });
+
+    menu.appendChild(menuContent);
+    container.appendChild(button);
+    container.appendChild(menu);
+
+    // 插入到全屏按钮之前
+    const fullscreenBtn = controlBar.querySelector('.vjs-fullscreen-control');
+    if (fullscreenBtn) {
+        controlBar.insertBefore(container, fullscreenBtn);
+    } else {
+        controlBar.appendChild(container);
+    }
+
+    console.log('音轨选择器已创建，共', hls.audioTracks.length, '个音轨');
+}
+
+// ==========================================
+// 工具函数
 // ==========================================
 
 function escapeHtml(text) {

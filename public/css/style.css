@@ -1501,3 +1501,65 @@ ul {
   color: var(--primary-light);
   font-size: 0.9rem;
 }
+
+/* 音轨选择器样式 */
+.audio-track-selector {
+  position: relative;
+  cursor: pointer;
+}
+
+.audio-track-selector button {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  padding: 0 0.5rem;
+  cursor: pointer;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.audio-track-selector button:hover {
+  color: var(--primary-light);
+}
+
+.audio-track-menu {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0;
+  min-width: 150px;
+  z-index: 100;
+}
+
+.audio-track-selector:hover .audio-track-menu {
+  display: block;
+}
+
+.audio-track-menu .vjs-menu-content {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.audio-track-menu .vjs-menu-item {
+  padding: 0.5rem 1rem;
+  color: white;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.audio-track-menu .vjs-menu-item:hover {
+  background: rgba(99, 102, 241, 0.3);
+}
+
+.audio-track-menu .vjs-menu-item.vjs-selected {
+  background: var(--primary);
+  color: white;
+}
