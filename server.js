@@ -103,9 +103,15 @@ class Room {
       currentTime: 0,
       lastUpdated: Date.now()
     };
-    this.users = new Map(); // socketId -> { name, joinedAt }
+    this.users = new Map(); // socketId -> { name, joinedAt, isHost }
     this.messages = [];
     this.createdAt = Date.now();
+    // 权限配置
+    this.settings = {
+      allowAllChangeVideo: false,     // 是否允许所有人更换视频
+      allowAllChangeSubtitle: false,  // 是否允许所有人更换字幕
+      allowAllControl: true            // 是否允许所有人控制播放
+    };
   }
 
   addUser(socketId, name) {
@@ -152,6 +158,27 @@ class Room {
       this.messages.shift();
     }
     return message;
+  }
+
+  updateUserName(socketId, newName) {
+    const user = this.users.get(socketId);
+    if (user) {
+      user.name = newName;
+      return true;
+    }
+    return false;
+  }
+
+  updateSettings(newSettings) {
+    this.settings = { ...this.settings, ...newSettings };
+  }
+
+  transferHost(newHostId) {
+    if (this.users.has(newHostId)) {
+      this.hostId = newHostId;
+      return true;
+    }
+    return false;
   }
 }
 
@@ -674,6 +701,26 @@ app.use((err, req, res, next) => {
   next();
 });
 
+// 权限检查辅助函数
+function checkPermission(room, socketId, action) {
+  if (!room) return false;
+
+  // 房主始终有权限
+  if (room.hostId === socketId) return true;
+
+  // 根据不同操作检查权限
+  switch (action) {
+    case 'change-video':
+      return room.settings.allowAllChangeVideo;
+    case 'change-subtitle':
+      return room.settings.allowAllChangeSubtitle;
+    case 'control':
+      return room.settings.allowAllControl;
+    default:
+      return false;
+  }
+}
+
 // Socket.io 事件处理
 io.on('connection', (socket) => {
   console.log(`用户连接: ${socket.id}`);
@@ -685,13 +732,10 @@ io.on('connection', (socket) => {
   socket.on('create-room', ({ userName }, callback) => {
     const roomId = uuidv4().substring(0, 8).toUpperCase();
     const room = new Room(roomId, userName);
-    room.addUser(socket.id, userName);
-    room.hostId = socket.id;
+    // 不要在这里添加用户和设置 hostId
+    // 让用户跳转到 room.html 后通过 join-room 加入
+    // addUser 会自动将第一个用户设为房主
     rooms.set(roomId, room);
-
-    socket.join(roomId);
-    currentRoom = roomId;
-    currentUserName = userName;
 
     console.log(`房间创建: ${roomId} by ${userName}`);
 
@@ -733,7 +777,8 @@ io.on('connection', (socket) => {
       subtitleUrl: room.subtitleUrl,
       videoState: room.videoState,
       userList: room.getUserList(),
-      messages: room.messages.slice(-50) // 发送最近50条消息
+      messages: room.messages.slice(-50), // 发送最近50条消息
+      settings: room.settings // 添加房间设置
     });
   });
 
@@ -742,6 +787,12 @@ io.on('connection', (socket) => {
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
     if (!room) return;
+
+    // 权限检查
+    if (!checkPermission(room, socket.id, 'change-video')) {
+      socket.emit('permission-denied', { action: 'change-video', message: '只有房主可以更换视频' });
+      return;
+    }
 
     room.videoUrl = url;
     room.videoState = {
@@ -764,6 +815,12 @@ io.on('connection', (socket) => {
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
     if (!room) return;
+
+    // 权限检查
+    if (!checkPermission(room, socket.id, 'change-subtitle')) {
+      socket.emit('permission-denied', { action: 'change-subtitle', message: '只有房主可以更换字幕' });
+      return;
+    }
 
     room.subtitleUrl = url;
 
@@ -854,6 +911,104 @@ io.on('connection', (socket) => {
 
     // 广播给房间内所有人
     io.to(currentRoom).emit('new-message', message);
+  });
+
+  // 弹幕消息
+  socket.on('send-danmaku', (data) => {
+    if (!currentRoom || !currentUserName) return;
+
+    // 广播给房间内其他人 (发送者自己已经在本地显示了)
+    // 但为了确保多端同步，广播给所有人也没问题，前端做了过滤
+    io.to(currentRoom).emit('broadcast-danmaku', {
+      ...data,
+      userId: socket.id,
+      userName: currentUserName
+    });
+  });
+
+  // 更新房间设置
+  socket.on('update-settings', ({ settings }, callback) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    // 只有房主可以修改设置
+    if (room.hostId !== socket.id) {
+      if (callback) callback({ success: false, error: '只有房主可以修改房间设置' });
+      return;
+    }
+
+    room.updateSettings(settings);
+
+    // 广播给房间内所有人
+    io.to(currentRoom).emit('settings-updated', {
+      settings: room.settings,
+      updatedBy: currentUserName
+    });
+
+    console.log(`房间 ${currentRoom} 设置已更新:`, settings);
+
+    if (callback) callback({ success: true, settings: room.settings });
+  });
+
+  // 修改昵称
+  socket.on('change-nickname', ({ newName }, callback) => {
+    if (!currentRoom || !newName) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    const trimmedName = newName.trim();
+    if (!trimmedName || trimmedName.length > 10) {
+      if (callback) callback({ success: false, error: '昵称长度必须在 1-10 个字符之间' });
+      return;
+    }
+
+    const oldName = currentUserName;
+    if (room.updateUserName(socket.id, trimmedName)) {
+      currentUserName = trimmedName;
+
+      // 广播给房间内所有人
+      io.to(currentRoom).emit('nickname-changed', {
+        userId: socket.id,
+        oldName,
+        newName: trimmedName,
+        userList: room.getUserList()
+      });
+
+      console.log(`用户 ${oldName} 改名为 ${trimmedName}`);
+
+      if (callback) callback({ success: true, newName: trimmedName });
+    } else {
+      if (callback) callback({ success: false, error: '修改昵称失败' });
+    }
+  });
+
+  // 转让房主
+  socket.on('transfer-host', ({ targetUserId }, callback) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    // 只有当前房主可以转让
+    if (room.hostId !== socket.id) {
+      if (callback) callback({ success: false, error: '只有房主可以转让权限' });
+      return;
+    }
+
+    if (room.transferHost(targetUserId)) {
+      // 广播给房间内所有人
+      io.to(currentRoom).emit('host-transferred', {
+        oldHostId: socket.id,
+        newHostId: targetUserId,
+        userList: room.getUserList()
+      });
+
+      console.log(`房间 ${currentRoom} 房主转让: ${socket.id} -> ${targetUserId}`);
+
+      if (callback) callback({ success: true });
+    } else {
+      if (callback) callback({ success: false, error: '目标用户不存在' });
+    }
   });
 
   // 用户断开连接

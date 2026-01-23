@@ -14,6 +14,11 @@ let isHost = false;
 let isSyncing = false; // 防止同步循环
 let danmakuEnabled = true; // 弹幕开关
 let danmakuSpeed = 10; // 弹幕速度 (秒)
+let roomSettings = {
+    allowAllChangeVideo: false,
+    allowAllChangeSubtitle: false,
+    allowAllControl: true
+};
 
 // ==========================================
 // 工具函数
@@ -114,11 +119,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function startRoom() {
-    isHost = sessionStorage.getItem('isHost') === 'true'; // 重新获取可能更新的状态
+    // 不要在这里读取 isHost，等待服务器响应
     initSocket();
     initVideoPlayer();
     initEventListeners();
-    initDanmakuControl();
+    initPermissionListeners();
 }
 
 // ==========================================
@@ -323,6 +328,42 @@ function initSocket() {
 
         console.log(`[转码进度] ${data.stage}: ${data.progress}% - ${data.message}`);
     });
+
+    // 房间设置更新
+    socket.on('settings-updated', ({ settings, updatedBy }) => {
+        roomSettings = settings;
+        showNotification(`${updatedBy} 更新了房间设置`);
+        // 如果设置模态框打开，更新开关状态
+        updateSettingsUI();
+    });
+
+    // 昵称修改
+    socket.on('nickname-changed', ({ userId, oldName, newName, userList }) => {
+        if (userId === socket.id) {
+            userName = newName;
+            sessionStorage.setItem('userName', newName);
+        }
+        updateUserList(userList);
+        showNotification(`${oldName} 改名为 ${newName}`);
+    });
+
+    // 房主转让
+    socket.on('host-transferred', ({ oldHostId, newHostId, userList }) => {
+        if (newHostId === socket.id) {
+            isHost = true;
+            showToast('你已成为房主', 'success');
+        } else if (oldHostId === socket.id) {
+            isHost = false;
+            showToast('房主已转让', 'info');
+        }
+        updateHostUI();
+        updateUserList(userList);
+    });
+
+    // 权限被拒绝
+    socket.on('permission-denied', ({ action, message }) => {
+        showToast(message || '权限不足', 'error');
+    });
 }
 
 function joinRoom() {
@@ -332,6 +373,19 @@ function joinRoom() {
         if (response.success) {
             showConnectionOverlay(false);
             updateSyncStatus('', '已同步');
+
+            console.log('[joinRoom] 完整响应:', response);
+            console.log('[joinRoom] response.isHost:', response.isHost, typeof response.isHost);
+
+            // 更新房主状态和房间设置
+            isHost = response.isHost;
+            console.log('[joinRoom] 设置后的 isHost:', isHost);
+            if (response.settings) {
+                roomSettings = response.settings;
+            }
+
+            // 更新 UI 显示
+            updateHostUI();
             updateUserList(response.userList);
 
             // 加载现有视频
@@ -380,7 +434,7 @@ function initVideoPlayer() {
     const videoElement = document.getElementById('video-player');
 
     player = videojs(videoElement, {
-        controls: true,
+        controls: false, // 禁用默认控件
         autoplay: false,
         preload: 'auto',
         fluid: false,
@@ -393,20 +447,15 @@ function initVideoPlayer() {
             nativeAudioTracks: false,
             nativeVideoTracks: false
         },
-        controlBar: {
-            children: [
-                'playToggle',
-                'volumePanel',
-                'currentTimeDisplay',
-                'timeDivider',
-                'durationDisplay',
-                'progressControl',
-                'audioTrackButton', // 多声道支持
-                'subsCapsButton',
-                'qualitySelector',
-                'fullscreenToggle',
-            ]
+        userActions: {
+            doubleClick: false // 禁用双击全屏，防止冲突
         }
+    });
+
+    // 初始化自定义控件和弹幕系统
+    player.ready(() => {
+        initCustomControls();
+        initDanmakuSystem();
     });
 
     // 播放事件
@@ -497,6 +546,9 @@ function loadVideo(url, startTime = 0, autoPlay = false) {
             enableWorker: true,
             lowLatencyMode: false
         });
+
+        // Store reference for audio track selector
+        currentHls = hls;
 
         hls.loadSource(url);
         hls.attachMedia(videoElement);
@@ -662,7 +714,7 @@ function initEventListeners() {
         uploadSubtitle(file);
     });
 
-    // 发送聊天消息
+    // 发送聊天消息 - 同时显示为弹幕
     document.getElementById('chat-form').addEventListener('submit', (e) => {
         e.preventDefault();
 
@@ -672,6 +724,12 @@ function initEventListeners() {
         if (!text) return;
 
         socket.emit('chat-message', { text });
+
+        // 同时显示为弹幕（如果弹幕系统已初始化）
+        if (danmakuManager && player) {
+            danmakuManager.shoot(text, '#FFD700', true); // 金色标识聊天来源
+        }
+
         input.value = '';
     });
 }
@@ -851,32 +909,17 @@ function updateUserList(users) {
 
     userCount.textContent = users.length;
 
-    userList.innerHTML = users.map(user => `
-    <li>
-      <div class="user-avatar">${getInitial(user.name)}</div>
-      <span class="user-name">${escapeHtml(user.name)}</span>
-      ${user.isHost ? '<span class="host-badge" title="房主 (管理员)"><i class="fa-solid fa-crown"></i></span>' : ''}
-    </li>
-  `).join('');
-}
-
-// ==========================================
-// 邀请功能
-// ==========================================
-function copyInviteLink() {
-    const url = window.location.href;
-    navigator.clipboard.writeText(url).then(() => {
-        showToast('邀请链接已复制', 'success');
-    }).catch(() => {
-        // 降级方案
-        const input = document.createElement('input');
-        input.value = url;
-        document.body.appendChild(input);
-        input.select();
-        document.execCommand('copy');
-        document.body.removeChild(input);
-        showToast('邀请链接已复制', 'success');
-    });
+    userList.innerHTML = users.map(user => {
+        const isCurrentUser = socket && user.id === socket.id;
+        return `
+        <li class="user-item">
+            <div class="user-avatar">${getInitial(user.name)}</div>
+            <span class="user-name">${escapeHtml(user.name)}</span>
+            ${user.isHost ? '<span class="host-badge" title="房主"><i class="fa-solid fa-crown"></i></span>' : ''}
+            ${isCurrentUser ? '<button class="edit-nickname-btn" onclick="showNicknameModal()" title="修改昵称"><i class="fa-solid fa-pen"></i></button>' : ''}
+        </li>
+        `;
+    }).join('');
 }
 
 // ==========================================
@@ -921,80 +964,8 @@ function addSystemMessage(text) {
 }
 
 // ==========================================
-// 弹幕功能
+// 弹幕功能 - 已移至文件末尾的 Bilibili-Style Player 部分
 // ==========================================
-
-class DanmakuManager {
-    constructor(containerId) {
-        this.container = document.getElementById(containerId);
-        this.tracks = [0, 1, 2, 3, 4]; // 轨道数
-        this.trackHeight = 40; // 轨道高度
-    }
-
-    add(text, color = '#ffffff') {
-        if (!danmakuEnabled || !this.container) return;
-
-        const item = document.createElement('div');
-        item.className = 'danmaku-item';
-        item.textContent = text;
-        item.style.color = color;
-
-        // 随机分配轨道
-        const track = Math.floor(Math.random() * this.tracks.length);
-        const top = track * this.trackHeight + 20; // 20px padding
-        item.style.top = `${top}px`;
-
-        // 设置初始位置
-        item.style.left = '100%';
-        item.style.transform = 'translateX(0)';
-
-        this.container.appendChild(item);
-
-        // 动画
-        const duration = 8000 + Math.random() * 4000; // 8-12秒
-
-        // 使用 Web Animations API
-        const animation = item.animate([
-            { transform: 'translateX(0)', left: '100%' },
-            { transform: 'translateX(-100%)', left: '-100px' } // 移出屏幕
-        ], {
-            duration: duration,
-            easing: 'linear'
-        });
-
-        animation.onfinish = () => {
-            item.remove();
-        };
-    }
-
-    clear() {
-        if (this.container) {
-            this.container.innerHTML = '';
-        }
-    }
-}
-
-const danmakuManager = new DanmakuManager('danmaku-container');
-
-// 初始化弹幕开关
-function initDanmakuControl() {
-    const btn = document.getElementById('toggle-danmaku-btn');
-    if (!btn) return;
-
-    btn.addEventListener('click', () => {
-        danmakuEnabled = !danmakuEnabled;
-
-        if (danmakuEnabled) {
-            btn.classList.add('active');
-            btn.querySelector('span').textContent = '弹幕: 开';
-            document.getElementById('danmaku-container').style.opacity = '1';
-        } else {
-            btn.classList.remove('active');
-            btn.querySelector('span').textContent = '弹幕: 关';
-            document.getElementById('danmaku-container').style.opacity = '0';
-        }
-    });
-}
 
 // ==========================================
 // 安全函数
@@ -1073,6 +1044,187 @@ function escapeHtml(text) {
 }
 
 // ==========================================
+// 权限管理与用户功能
+// ==========================================
+
+// 更新房主 UI
+function updateHostUI() {
+    const hostIndicator = document.getElementById('host-indicator');
+    const settingsBtn = document.getElementById('settings-btn');
+
+    console.log('[updateHostUI] isHost:', isHost, 'hostIndicator:', hostIndicator, 'settingsBtn:', settingsBtn);
+
+    if (!hostIndicator || !settingsBtn) {
+        console.warn('[updateHostUI] 元素未找到');
+        return;
+    }
+
+    if (isHost) {
+        hostIndicator.style.display = 'flex';
+        settingsBtn.style.display = 'flex';
+        console.log('[updateHostUI] 显示房主 UI');
+    } else {
+        hostIndicator.style.display = 'none';
+        settingsBtn.style.display = 'none';
+        console.log('[updateHostUI] 隐藏房主 UI');
+    }
+}
+
+// 更新设置 UI
+function updateSettingsUI() {
+    document.getElementById('allow-video-switch').checked = roomSettings.allowAllChangeVideo;
+    document.getElementById('allow-subtitle-switch').checked = roomSettings.allowAllChangeSubtitle;
+    document.getElementById('allow-control-switch').checked = roomSettings.allowAllControl;
+}
+
+// 复制邀请链接
+function copyInviteLink() {
+    const inviteUrl = `${window.location.origin}/room.html?id=${roomId}`;
+    navigator.clipboard.writeText(inviteUrl).then(() => {
+        showToast('邀请链接已复制', 'success');
+    }).catch(() => {
+        // 降级方案
+        const input = document.createElement('input');
+        input.value = inviteUrl;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        showToast('邀请链接已复制', 'success');
+    });
+}
+
+// 显示设置模态框
+function showSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    updateSettingsUI();
+    modal.classList.add('show');
+}
+
+// 隐藏设置模态框
+function hideSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    modal.classList.remove('show');
+}
+
+// 保存房间设置
+function saveRoomSettings() {
+    const settings = {
+        allowAllChangeVideo: document.getElementById('allow-video-switch').checked,
+        allowAllChangeSubtitle: document.getElementById('allow-subtitle-switch').checked,
+        allowAllControl: document.getElementById('allow-control-switch').checked
+    };
+
+    socket.emit('update-settings', { settings }, (response) => {
+        if (response && response.success) {
+            roomSettings = response.settings;
+            hideSettingsModal();
+            showToast('设置已保存', 'success');
+        } else {
+            showToast(response?.error || '保存设置失败', 'error');
+        }
+    });
+}
+
+// 显示昵称修改模态框
+function showNicknameModal() {
+    const modal = document.getElementById('nickname-modal');
+    const input = document.getElementById('new-nickname-input');
+    input.value = userName;
+    modal.classList.add('show');
+    setTimeout(() => input.focus(), 100);
+}
+
+// 隐藏昵称修改模态框
+function hideNicknameModal() {
+    const modal = document.getElementById('nickname-modal');
+    modal.classList.remove('show');
+}
+
+// 保存昵称
+function saveNickname() {
+    const newName = document.getElementById('new-nickname-input').value.trim();
+
+    if (!newName) {
+        showToast('昵称不能为空', 'error');
+        return;
+    }
+
+    if (newName === userName) {
+        hideNicknameModal();
+        return;
+    }
+
+    socket.emit('change-nickname', { newName }, (response) => {
+        if (response && response.success) {
+            hideNicknameModal();
+            showToast('昵称已修改', 'success');
+        } else {
+            showToast(response?.error || '修改昵称失败', 'error');
+        }
+    });
+}
+
+// 初始化权限相关事件监听
+function initPermissionListeners() {
+    // 邀请按钮
+    const inviteBtn = document.getElementById('invite-btn');
+    if (inviteBtn) {
+        inviteBtn.addEventListener('click', copyInviteLink);
+    }
+
+    // 设置按钮
+    const settingsBtn = document.getElementById('settings-btn');
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', showSettingsModal);
+    }
+
+    // 设置模态框
+    const settingsClose = document.getElementById('settings-close');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    const settingsModal = document.getElementById('settings-modal');
+
+    if (settingsClose) {
+        settingsClose.addEventListener('click', hideSettingsModal);
+    }
+    if (saveSettingsBtn) {
+        saveSettingsBtn.addEventListener('click', saveRoomSettings);
+    }
+    if (settingsModal) {
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) hideSettingsModal();
+        });
+    }
+
+    // 昵称模态框
+    const nicknameClose = document.getElementById('nickname-close');
+    const saveNicknameBtn = document.getElementById('save-nickname-btn');
+    const cancelNicknameBtn = document.getElementById('cancel-nickname-btn');
+    const nicknameModal = document.getElementById('nickname-modal');
+    const nicknameInput = document.getElementById('new-nickname-input');
+
+    if (nicknameClose) {
+        nicknameClose.addEventListener('click', hideNicknameModal);
+    }
+    if (saveNicknameBtn) {
+        saveNicknameBtn.addEventListener('click', saveNickname);
+    }
+    if (cancelNicknameBtn) {
+        cancelNicknameBtn.addEventListener('click', hideNicknameModal);
+    }
+    if (nicknameModal) {
+        nicknameModal.addEventListener('click', (e) => {
+            if (e.target === nicknameModal) hideNicknameModal();
+        });
+    }
+    if (nicknameInput) {
+        nicknameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') saveNickname();
+        });
+    }
+}
+
+// ==========================================
 // 页面离开前清理
 // ==========================================
 
@@ -1086,3 +1238,402 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('🎬 放映室已加载');
+
+// ==========================================
+// 📺 Bilibili-Style Player & Danmaku Logic
+// ==========================================
+
+class DanmakuManager {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.tracks = []; // 轨道占用状态
+        this.trackHeight = 30; // 轨道高度
+        this.duration = 10000; // 弹幕通过屏幕时间 (ms)
+    }
+
+    // 发送弹幕
+    shoot(text, color = '#ffffff', isSelf = false) {
+        const item = document.createElement('div');
+        item.className = 'danmaku-item';
+        item.textContent = text;
+        item.style.color = color;
+        if (isSelf) {
+            item.style.border = '1px solid rgba(255,255,255,0.5)';
+            item.style.zIndex = 100;
+        }
+
+        this.container.appendChild(item);
+
+        // 计算轨道
+        const trackIndex = this.findAvailableTrack();
+        const top = trackIndex * this.trackHeight;
+        item.style.top = top + 'px';
+
+        // 标记轨道占用 (简单逻辑：占用 1秒)
+        this.tracks[trackIndex] = Date.now() + 1000;
+
+        // 动画
+        const startLeft = this.container.offsetWidth;
+        const endLeft = -item.offsetWidth;
+
+        item.style.transform = `translateX(${startLeft}px)`;
+
+        // 强制重绘
+        item.offsetHeight;
+
+        item.style.transition = `transform ${this.duration}ms linear`;
+        item.style.transform = `translateX(${endLeft}px)`;
+
+        // 清理
+        setTimeout(() => {
+            item.remove();
+        }, this.duration);
+    }
+
+    findAvailableTrack() {
+        const now = Date.now();
+        const maxTracks = Math.floor(this.container.offsetHeight / this.trackHeight);
+
+        for (let i = 0; i < maxTracks; i++) {
+            if (!this.tracks[i] || this.tracks[i] < now) {
+                return i;
+            }
+        }
+        return Math.floor(Math.random() * maxTracks); // 没轨道了随机挤一个
+    }
+
+    clear() {
+        this.container.innerHTML = '';
+        this.tracks = [];
+    }
+}
+
+let danmakuManager;
+
+function initDanmakuSystem() {
+    danmakuManager = new DanmakuManager('danmaku-layer');
+    const input = document.getElementById('danmaku-input');
+    const sendBtn = document.getElementById('send-danmaku-btn');
+    const toggleBtn = document.getElementById('danmaku-toggle-btn');
+    const layer = document.getElementById('danmaku-layer');
+
+    function send() {
+        const text = input.value.trim();
+        if (!text) return;
+
+        // 本地显示弹幕
+        danmakuManager.shoot(text, '#ffffff', true);
+
+        // 发送给服务器（同时作为聊天消息）
+        socket.emit('send-danmaku', {
+            text: text,
+            color: '#ffffff',
+            time: player.currentTime()
+        });
+
+        // 同时发送到聊天
+        socket.emit('chat-message', { text: text });
+
+        input.value = '';
+    }
+
+    sendBtn.addEventListener('click', send);
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') send();
+    });
+
+    // 弹幕开关
+    let isDanmakuOn = true;
+    toggleBtn.addEventListener('click', () => {
+        isDanmakuOn = !isDanmakuOn;
+        layer.style.display = isDanmakuOn ? 'block' : 'none';
+        toggleBtn.classList.toggle('active', isDanmakuOn);
+        toggleBtn.innerHTML = isDanmakuOn ? '<i class="fa-solid fa-comment-dots"></i>' : '<i class="fa-regular fa-comment-dots"></i>';
+    });
+
+    // 监听服务器弹幕
+    socket.on('broadcast-danmaku', (data) => {
+        if (data.userId !== socket.id) { // 自己的已经在本地显示了
+            danmakuManager.shoot(data.text, data.color);
+        }
+    });
+}
+
+// 自定义控件逻辑
+function initCustomControls() {
+    const controls = document.getElementById('custom-controls');
+    const playBtn = document.getElementById('play-pause-btn');
+    const volumeBtn = document.getElementById('volume-btn');
+    const volumeSlider = document.getElementById('volume-slider');
+    const speedMenu = document.querySelector('.speed-menu');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const progressContainer = document.getElementById('progress-container');
+    const progressBarCurrent = document.getElementById('progress-current');
+    const progressBarBuffered = document.getElementById('progress-buffered');
+    const currentTimeEl = document.getElementById('current-time');
+    const durationEl = document.getElementById('duration');
+    const speedDisplay = document.getElementById('current-speed');
+
+    controls.style.display = 'flex'; // 显示控件
+
+    // Play/Pause
+    function togglePlay() {
+        if (player.paused()) player.play();
+        else player.pause();
+    }
+
+    playBtn.addEventListener('click', togglePlay);
+    player.on('play', () => playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>');
+    player.on('pause', () => playBtn.innerHTML = '<i class="fa-solid fa-play"></i>');
+
+    // Progress Bar
+    function updateProgress() {
+        const percent = (player.currentTime() / player.duration()) * 100;
+        progressBarCurrent.style.width = percent + '%';
+        currentTimeEl.textContent = formatTime(player.currentTime());
+        durationEl.textContent = formatTime(player.duration());
+
+        const buffered = player.bufferedEnd();
+        const bufferedPercent = (buffered / player.duration()) * 100;
+        progressBarBuffered.style.width = bufferedPercent + '%';
+    }
+
+    player.on('timeupdate', updateProgress);
+    player.on('progress', updateProgress); // buffer update
+
+    progressContainer.addEventListener('click', (e) => {
+        const rect = progressContainer.getBoundingClientRect();
+        const pos = (e.clientX - rect.left) / rect.width;
+        player.currentTime(pos * player.duration());
+    });
+
+    // Volume
+    volumeSlider.addEventListener('input', (e) => {
+        player.volume(e.target.value);
+    });
+
+    player.on('volumechange', () => {
+        const vol = player.volume();
+        volumeSlider.value = vol;
+        if (player.muted() || vol === 0) {
+            volumeBtn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+        } else if (vol < 0.5) {
+            volumeBtn.innerHTML = '<i class="fa-solid fa-volume-low"></i>';
+        } else {
+            volumeBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+        }
+    });
+
+    volumeBtn.addEventListener('click', () => {
+        player.muted(!player.muted());
+    });
+
+    // Speed
+    document.querySelectorAll('.speed-option').forEach(opt => {
+        opt.addEventListener('click', () => {
+            const speed = parseFloat(opt.dataset.speed);
+            player.playbackRate(speed);
+            speedDisplay.textContent = speed + 'x';
+        });
+    });
+
+    // Fullscreen - 使用 video-wrapper 容器（包含自定义控件）
+    const videoWrapper = document.getElementById('video-wrapper');
+    fullscreenBtn.addEventListener('click', () => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+            fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
+        } else {
+            videoWrapper.requestFullscreen();
+            fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
+        }
+    });
+
+    // 监听全屏变化事件
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement) {
+            fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
+            // 启动全屏自动隐藏逻辑
+            startFullscreenAutoHide();
+        } else {
+            fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
+            // 退出全屏时清理
+            stopFullscreenAutoHide();
+        }
+    });
+
+    // 全屏自动隐藏逻辑
+    let hideTimer = null;
+    let isControlsVisible = true;
+
+    function showControls() {
+        controls.style.opacity = '1';
+        videoWrapper.style.cursor = 'default';
+        isControlsVisible = true;
+    }
+
+    function hideControls() {
+        if (document.fullscreenElement) {
+            controls.style.opacity = '0';
+            videoWrapper.style.cursor = 'none';
+            isControlsVisible = false;
+        }
+    }
+
+    function resetHideTimer() {
+        showControls();
+        clearTimeout(hideTimer);
+        if (document.fullscreenElement) {
+            hideTimer = setTimeout(hideControls, 3000); // 3秒后隐藏
+        }
+    }
+
+    function startFullscreenAutoHide() {
+        videoWrapper.addEventListener('mousemove', resetHideTimer);
+        videoWrapper.addEventListener('click', resetHideTimer);
+        resetHideTimer();
+    }
+
+    function stopFullscreenAutoHide() {
+        videoWrapper.removeEventListener('mousemove', resetHideTimer);
+        videoWrapper.removeEventListener('click', resetHideTimer);
+        clearTimeout(hideTimer);
+        showControls();
+    }
+
+    // Audio Track Selector (HLS.js)
+    initAudioTrackSelector();
+
+    // Subtitle Selector
+    initSubtitleSelector();
+}
+
+function formatTime(seconds) {
+    if (isNaN(seconds)) return '00:00';
+    const min = Math.floor(seconds / 60);
+    const sec = Math.floor(seconds % 60);
+    return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+}
+
+// ==========================================
+// 音轨选择器
+// ==========================================
+
+let currentHls = null; // Store HLS instance reference
+
+function initAudioTrackSelector() {
+    const audioSelector = document.getElementById('audio-selector');
+    const audioMenu = document.getElementById('audio-menu');
+
+    if (!audioSelector || !audioMenu) return;
+
+    // Listen for HLS instance creation (set by video loading code)
+    function updateAudioTracks() {
+        if (!currentHls || !currentHls.audioTracks || currentHls.audioTracks.length <= 1) {
+            audioSelector.style.display = 'none';
+            return;
+        }
+
+        audioSelector.style.display = 'flex';
+        audioMenu.innerHTML = '';
+
+        currentHls.audioTracks.forEach((track, index) => {
+            const item = document.createElement('div');
+            item.className = 'menu-item' + (index === currentHls.audioTrack ? ' active' : '');
+            item.textContent = track.name || `音轨 ${index + 1}`;
+            item.dataset.index = index;
+
+            item.addEventListener('click', () => {
+                currentHls.audioTrack = index;
+                audioMenu.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+                item.classList.add('active');
+                showToast(`已切换到: ${track.name || '音轨 ' + (index + 1)}`, 'success');
+            });
+
+            audioMenu.appendChild(item);
+        });
+
+        console.log('[AudioSelector] 已更新音轨列表，共', currentHls.audioTracks.length, '个音轨');
+    }
+
+    // Check periodically for HLS instance
+    const checkInterval = setInterval(() => {
+        if (currentHls) {
+            updateAudioTracks();
+            currentHls.on(Hls.Events.AUDIO_TRACKS_UPDATED, updateAudioTracks);
+            clearInterval(checkInterval);
+        }
+    }, 1000);
+
+    // Clear after 30 seconds if no HLS
+    setTimeout(() => clearInterval(checkInterval), 30000);
+}
+
+// ==========================================
+// 字幕选择器
+// ==========================================
+
+function initSubtitleSelector() {
+    const subtitleSelector = document.getElementById('subtitle-selector');
+    const subtitleMenu = document.getElementById('subtitle-menu');
+
+    if (!subtitleSelector || !subtitleMenu || !player) return;
+
+    function updateSubtitleMenu() {
+        const textTracks = player.textTracks();
+        subtitleMenu.innerHTML = '';
+
+        // Add "Off" option
+        const offItem = document.createElement('div');
+        offItem.className = 'menu-item active';
+        offItem.textContent = '关闭字幕';
+        offItem.dataset.mode = 'off';
+        offItem.addEventListener('click', () => {
+            for (let i = 0; i < textTracks.length; i++) {
+                textTracks[i].mode = 'disabled';
+            }
+            subtitleMenu.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+            offItem.classList.add('active');
+            showToast('字幕已关闭', 'success');
+        });
+        subtitleMenu.appendChild(offItem);
+
+        // Add subtitle tracks
+        for (let i = 0; i < textTracks.length; i++) {
+            const track = textTracks[i];
+            if (track.kind !== 'subtitles' && track.kind !== 'captions') continue;
+
+            const item = document.createElement('div');
+            item.className = 'menu-item' + (track.mode === 'showing' ? ' active' : '');
+            item.textContent = track.label || `字幕 ${i + 1}`;
+            item.dataset.index = i;
+
+            item.addEventListener('click', () => {
+                // Disable all tracks first
+                for (let j = 0; j < textTracks.length; j++) {
+                    textTracks[j].mode = 'disabled';
+                }
+                // Enable selected track
+                track.mode = 'showing';
+                subtitleMenu.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+                item.classList.add('active');
+                showToast(`已启用: ${track.label || '字幕 ' + (i + 1)}`, 'success');
+            });
+
+            subtitleMenu.appendChild(item);
+
+            // Update active state if track is showing
+            if (track.mode === 'showing') {
+                offItem.classList.remove('active');
+                item.classList.add('active');
+            }
+        }
+    }
+
+    // Initial update
+    updateSubtitleMenu();
+
+    // Listen for track changes
+    player.textTracks().addEventListener('addtrack', updateSubtitleMenu);
+    player.textTracks().addEventListener('removetrack', updateSubtitleMenu);
+}
