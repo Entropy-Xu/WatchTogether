@@ -233,16 +233,18 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
     console.log(`开始 HLS 转换: ${originalName}...`);
 
-    // 使用 ffprobe 检测音轨数量 (JSON 输出更可靠)
+    // 使用 ffprobe 检测音轨数量和元数据 (JSON 输出)
     // 使用宝塔面板安装的 ffmpeg 路径
     const ffmpegDir = '/www/server/ffmpeg/ffmpeg-6.1';
     const ffprobePath = `${ffmpegDir}/ffprobe`;
     const ffmpegPath = `${ffmpegDir}/ffmpeg`;
-    const probeCmd = `${ffprobePath} -v error -select_streams a -show_entries stream=index,codec_name -of json "${originalPath}"`;
+    // 获取音轨的 index, codec, title, language
+    const probeCmd = `${ffprobePath} -v error -select_streams a -show_entries stream=index,codec_name:stream_tags=title,language -of json "${originalPath}"`;
     console.log('ffprobe 命令:', probeCmd);
 
     exec(probeCmd, (probeErr, probeOut, probeStderr) => {
       let numAudio = 1;
+      let audioStreams = [];
 
       // 调试输出
       if (probeErr) {
@@ -257,8 +259,12 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         if (!probeErr && probeOut && probeOut.trim()) {
           const probeData = JSON.parse(probeOut);
           if (probeData.streams && probeData.streams.length > 0) {
-            numAudio = probeData.streams.length;
-            console.log('检测到的音轨:', probeData.streams.map((s, i) => `音轨${i + 1}: ${s.codec_name}`).join(', '));
+            audioStreams = probeData.streams;
+            numAudio = audioStreams.length;
+            console.log('检测到的音轨:', audioStreams.map((s, i) => {
+              const title = s.tags?.title || s.tags?.language || `Audio${i + 1}`;
+              return `音轨${i + 1}: ${s.codec_name} (${title})`;
+            }).join(', '));
           }
         }
       } catch (parseErr) {
@@ -274,9 +280,9 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
       // -preset fast: 快速预设 (平衡速度与质量)
       // -crf 23: 质量控制 (18-28, 越小质量越好)
       // -x264-params: x264 多线程参数
-      //   threads=16: 编码线程数
+      //   threads=28: 编码线程数
       //   sliced-threads=1: 启用切片线程
-      //   lookahead_threads=4: 预读线程
+      //   lookahead_threads=8: 预读线程
       // -c:a aac -b:a 192k: 音频转 AAC
       // -hls_time 4: 每个片段 4 秒
       // -hls_list_size 0: 完整播放列表
@@ -286,7 +292,17 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
       for (let i = 0; i < numAudio; i++) {
         mapArgs += ` -map 0:a:${i}?`;
-        varStreamMap += ` a:${i},agroup:audio,name:Audio${i + 1}`;
+        // 使用原始音轨名称，如果没有则使用语言或默认名称
+        let trackName = `Audio${i + 1}`;
+        if (audioStreams[i]?.tags) {
+          const tags = audioStreams[i].tags;
+          if (tags.title) {
+            trackName = tags.title.replace(/[^a-zA-Z0-9\u4e00-\u9fff\-_]/g, '_');
+          } else if (tags.language) {
+            trackName = tags.language;
+          }
+        }
+        varStreamMap += ` a:${i},agroup:audio,name:${trackName}`;
       }
 
       // 多核优化参数 (28核)
