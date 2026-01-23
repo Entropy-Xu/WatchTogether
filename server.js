@@ -4,8 +4,11 @@ const { Server } = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
 const app = express();
 const server = http.createServer(app);
@@ -152,6 +155,174 @@ class Room {
   }
 }
 
+// ============ 并行分片转码配置 ============
+const ffmpegDir = '/usr/local/bin';
+const ffprobePath = `${ffmpegDir}/ffprobe`;
+const ffmpegPath = `${ffmpegDir}/ffmpeg`;
+
+// 每个分片的时长 (秒) - 5分钟
+const SEGMENT_DURATION = 300;
+// 最大并行进程数 (基于 CPU 核心数)
+const MAX_PARALLEL_WORKERS = Math.max(2, Math.floor(os.cpus().length / 2));
+
+console.log(`并行转码配置: 每片 ${SEGMENT_DURATION}s, 最大 ${MAX_PARALLEL_WORKERS} 并行进程`);
+
+/**
+ * 获取视频时长 (秒)
+ */
+async function getVideoDuration(filePath) {
+  const cmd = `${ffprobePath} -v error -show_entries format=duration -of csv=p=0 "${filePath}"`;
+  try {
+    const { stdout } = await execAsync(cmd);
+    const duration = parseFloat(stdout.trim());
+    if (isNaN(duration)) throw new Error('Invalid duration');
+    return duration;
+  } catch (err) {
+    console.error('获取视频时长失败:', err.message);
+    return 0;
+  }
+}
+
+/**
+ * 获取音轨信息
+ */
+async function getAudioStreams(filePath) {
+  const cmd = `${ffprobePath} -v error -select_streams a -show_entries stream=index,codec_name:stream_tags=title,language -of json "${filePath}"`;
+  try {
+    const { stdout } = await execAsync(cmd);
+    const data = JSON.parse(stdout);
+    return data.streams || [];
+  } catch (err) {
+    console.error('获取音轨信息失败:', err.message);
+    return [];
+  }
+}
+
+/**
+ * 转码单个分片
+ * @param {Object} opts - 转码选项
+ * @returns {Promise<{success: boolean, segmentIndex: number, tsFiles: string[]}>}
+ */
+async function transcodeSegment(opts) {
+  const { inputPath, hlsDir, segmentIndex, startTime, duration, mapArgs } = opts;
+
+  const startTimeStr = formatTime(startTime);
+  const segmentPrefix = `seg_${segmentIndex}`;
+  const playlistPath = path.join(hlsDir, `stream_${segmentIndex}.m3u8`);
+
+  const ffmpegCmd = `${ffmpegPath} -y -threads 0 ` +
+    `-ss ${startTimeStr} -t ${duration} -i "${inputPath}" ${mapArgs} ` +
+    `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
+    `-c:a aac -b:a 128k -ac 2 ` +
+    `-f hls -hls_time 4 -hls_list_size 0 ` +
+    `-hls_segment_type mpegts ` +
+    `-hls_flags independent_segments ` +
+    `-hls_segment_filename "${hlsDir}/${segmentPrefix}_%04d.ts" ` +
+    `"${playlistPath}"`;
+
+  console.log(`[分片 ${segmentIndex}] 开始转码: ${startTimeStr} 时长 ${duration}s`);
+
+  try {
+    await execAsync(ffmpegCmd, { maxBuffer: 1024 * 1024 * 50 });
+
+    // 获取生成的 ts 文件列表
+    const tsFiles = fs.readdirSync(hlsDir)
+      .filter(f => f.startsWith(segmentPrefix) && f.endsWith('.ts'))
+      .sort();
+
+    console.log(`[分片 ${segmentIndex}] 转码完成, 生成 ${tsFiles.length} 个 ts 文件`);
+
+    return { success: true, segmentIndex, tsFiles, playlistPath };
+  } catch (err) {
+    console.error(`[分片 ${segmentIndex}] 转码失败:`, err.message);
+    return { success: false, segmentIndex, tsFiles: [], error: err.message };
+  }
+}
+
+/**
+ * 合并所有分片的 m3u8 播放列表
+ */
+function mergeHlsPlaylists(hlsDir, segmentResults, audioStreams) {
+  // 读取所有分片的 m3u8 并合并
+  let allSegments = [];
+  let targetDuration = 4;
+
+  for (const result of segmentResults) {
+    if (!result.success) continue;
+
+    const playlistContent = fs.readFileSync(result.playlistPath, 'utf-8');
+    const lines = playlistContent.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      // 提取 EXTINF 和 ts 文件
+      if (line.startsWith('#EXTINF:')) {
+        const duration = parseFloat(line.split(':')[1].split(',')[0]);
+        targetDuration = Math.max(targetDuration, Math.ceil(duration));
+        const tsFile = lines[i + 1]?.trim();
+        if (tsFile && tsFile.endsWith('.ts')) {
+          allSegments.push({ extinf: line, tsFile });
+        }
+      }
+    }
+  }
+
+  // 生成合并后的主播放列表
+  let masterContent = '#EXTM3U\n';
+  masterContent += '#EXT-X-VERSION:3\n';
+  masterContent += `#EXT-X-TARGETDURATION:${targetDuration}\n`;
+  masterContent += '#EXT-X-MEDIA-SEQUENCE:0\n';
+  masterContent += '#EXT-X-PLAYLIST-TYPE:VOD\n\n';
+
+  for (const seg of allSegments) {
+    masterContent += `${seg.extinf}\n${seg.tsFile}\n`;
+  }
+
+  masterContent += '#EXT-X-ENDLIST\n';
+
+  // 写入 stream_v.m3u8 (视频+默认音轨)
+  const streamPlaylist = path.join(hlsDir, 'stream_v.m3u8');
+  fs.writeFileSync(streamPlaylist, masterContent);
+
+  // 生成 master.m3u8
+  let masterPlaylist = '#EXTM3U\n';
+  masterPlaylist += '#EXT-X-VERSION:3\n\n';
+
+  // 音轨信息
+  if (audioStreams.length > 1) {
+    audioStreams.forEach((stream, i) => {
+      const name = stream.tags?.title || stream.tags?.language || `Audio${i + 1}`;
+      const isDefault = i === 0 ? 'YES' : 'NO';
+      masterPlaylist += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${name}",DEFAULT=${isDefault},AUTOSELECT=YES,URI="stream_v.m3u8"\n`;
+    });
+  }
+
+  masterPlaylist += '#EXT-X-STREAM-INF:BANDWIDTH=2000000,AUDIO="audio"\n';
+  masterPlaylist += 'stream_v.m3u8\n';
+
+  const masterPath = path.join(hlsDir, 'master.m3u8');
+  fs.writeFileSync(masterPath, masterPlaylist);
+
+  // 清理分片播放列表
+  for (const result of segmentResults) {
+    if (result.playlistPath && fs.existsSync(result.playlistPath)) {
+      fs.unlinkSync(result.playlistPath);
+    }
+  }
+
+  return masterPath;
+}
+
+/**
+ * 格式化时间为 HH:MM:SS 格式
+ */
+function formatTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 // API 路由
 app.get('/api/room/:roomId', (req, res) => {
   const room = rooms.get(req.params.roomId);
@@ -219,11 +390,10 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     return; // 结束字幕处理
   }
 
-  // HLS 多音轨转换 (MP4, MOV, MKV)
+  // HLS 多音轨转换 (MP4, MOV, MKV) - 并行分片版
   if (['.mp4', '.mov', '.mkv', '.avi', '.wmv', '.flv'].includes(ext)) {
     const videoId = path.basename(req.file.filename, path.extname(req.file.filename));
     const hlsDir = path.join(uploadsDir, videoId);
-    const masterPlaylist = path.join(hlsDir, 'master.m3u8');
     const masterUrl = `/uploads/${videoId}/master.m3u8`;
 
     // 创建 HLS 目录
@@ -231,122 +401,71 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
       fs.mkdirSync(hlsDir, { recursive: true });
     }
 
-    console.log(`开始 HLS 转换: ${originalName}...`);
+    console.log(`开始 HLS 并行转换: ${originalName}...`);
 
-    // 使用 ffprobe 检测音轨数量和元数据 (JSON 输出)
-    // 使用自编译的 ffmpeg (完整多线程支持)
-    const ffmpegDir = '/usr/local/bin';
-    const ffprobePath = `${ffmpegDir}/ffprobe`;
-    const ffmpegPath = `${ffmpegDir}/ffmpeg`;
-    // 获取音轨的 index, codec, title, language
-    const probeCmd = `${ffprobePath} -v error -select_streams a -show_entries stream=index,codec_name:stream_tags=title,language -of json "${originalPath}"`;
-    console.log('ffprobe 命令:', probeCmd);
-
-    exec(probeCmd, (probeErr, probeOut, probeStderr) => {
-      let numAudio = 1;
-      let audioStreams = [];
-
-      // 调试输出
-      if (probeErr) {
-        console.error('ffprobe 错误:', probeErr.message);
-      }
-      if (probeStderr) {
-        console.error('ffprobe stderr:', probeStderr);
-      }
-      console.log('ffprobe 原始输出:', probeOut);
-
+    // 使用 async IIFE 处理异步逻辑
+    (async () => {
       try {
-        if (!probeErr && probeOut && probeOut.trim()) {
-          const probeData = JSON.parse(probeOut);
-          if (probeData.streams && probeData.streams.length > 0) {
-            audioStreams = probeData.streams;
-            numAudio = audioStreams.length;
-            console.log('检测到的音轨:', audioStreams.map((s, i) => {
-              const title = s.tags?.title || s.tags?.language || `Audio${i + 1}`;
-              return `音轨${i + 1}: ${s.codec_name} (${title})`;
-            }).join(', '));
-          }
-        }
-      } catch (parseErr) {
-        console.error('ffprobe JSON 解析失败:', parseErr.message);
-        console.error('原始输出:', probeOut);
-      }
+        // 1. 获取视频时长和音轨信息
+        const [duration, audioStreams] = await Promise.all([
+          getVideoDuration(originalPath),
+          getAudioStreams(originalPath)
+        ]);
 
-      console.log(`检测到 ${numAudio} 个音轨`);
+        console.log(`视频时长: ${duration}s, 音轨数: ${audioStreams.length}`);
 
-      // 构建 FFmpeg 命令 (多核优化版 - 32核服务器)
-      // -threads 0: 全局线程数自动最大化
-      // -c:v libx264: 使用 x264 编码器 (支持多线程)
-      // -preset fast: 快速预设 (平衡速度与质量)
-      // -crf 23: 质量控制 (18-28, 越小质量越好)
-      // -x264-params: x264 多线程参数
-      //   threads=28: 编码线程数
-      //   sliced-threads=1: 启用切片线程
-      //   lookahead_threads=8: 预读线程
-      // -c:a aac -b:a 192k: 音频转 AAC
-      // -hls_time 4: 每个片段 4 秒
-      // -hls_list_size 0: 完整播放列表
-
-      let mapArgs = '-map 0:v:0';
-      let varStreamMap = 'v:0,agroup:audio';
-
-      for (let i = 0; i < numAudio; i++) {
-        mapArgs += ` -map 0:a:${i}?`;
-        // 使用原始音轨名称，如果没有则使用语言或默认名称
-        let trackName = `Audio${i + 1}`;
-        if (audioStreams[i]?.tags) {
-          const tags = audioStreams[i].tags;
-          if (tags.title) {
-            trackName = tags.title.replace(/[^a-zA-Z0-9\u4e00-\u9fff\-_]/g, '_');
-          } else if (tags.language) {
-            trackName = tags.language;
-          }
-        }
-        varStreamMap += ` a:${i},agroup:audio,name:${trackName}`;
-      }
-
-      // FFmpeg 转码优化参数 (速度优先)
-      // -threads 0: 自动检测最大线程，已足够让 H.264 跑满大部分 CPU
-      // -preset veryfast: 速度优先预设，比 medium 快 4-5 倍
-      // -crf 23: 质量控制 (稍高一点换取更小码率和更快速度)
-      // 移除高负载 x264opts，让 x264 自动优化线程管理
-
-      const ffmpegCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
-        `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
-        `-c:a aac -b:a 128k -ac 2 ` +
-        `-f hls ` +
-        `-hls_time 4 ` +
-        `-hls_list_size 0 ` +
-        `-hls_segment_type mpegts ` +
-        `-hls_flags independent_segments ` +
-        `-hls_segment_filename "${hlsDir}/seg_%v_%04d.ts" ` +
-        `-master_pl_name master.m3u8 ` +
-        `-var_stream_map "${varStreamMap}" ` +
-        `"${hlsDir}/stream_%v.m3u8"`;
-
-      console.log('FFmpeg 命令:', ffmpegCmd);
-
-      exec(ffmpegCmd, { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`HLS 转换失败: ${error.message}`);
-          console.error('FFmpeg stderr:', stderr);
-
-          // 降级：直接返回原文件
-          const fileUrl = `/uploads/${req.file.filename}`;
-          res.json({
-            success: true,
-            url: fileUrl,
-            filename: originalName,
-            size: req.file.size,
-            hls: false
-          });
-
-          // 清理空目录
-          fs.rmdir(hlsDir, { recursive: true }, () => { });
-          return;
+        if (duration <= 0) {
+          throw new Error('无法获取视频时长');
         }
 
-        console.log(`HLS 转换完成: ${masterUrl}`);
+        // 2. 计算分片
+        const numSegments = Math.ceil(duration / SEGMENT_DURATION);
+        const segments = [];
+
+        for (let i = 0; i < numSegments; i++) {
+          const startTime = i * SEGMENT_DURATION;
+          const segDuration = Math.min(SEGMENT_DURATION, duration - startTime);
+          segments.push({ index: i, startTime, duration: segDuration });
+        }
+
+        console.log(`分片计划: ${numSegments} 个分片, 并行度: ${Math.min(numSegments, MAX_PARALLEL_WORKERS)}`);
+
+        // 3. 构建 map 参数
+        let mapArgs = '-map 0:v:0';
+        for (let i = 0; i < audioStreams.length; i++) {
+          mapArgs += ` -map 0:a:${i}?`;
+        }
+
+        // 4. 并行转码 (限制并发数)
+        const results = [];
+        for (let i = 0; i < segments.length; i += MAX_PARALLEL_WORKERS) {
+          const batch = segments.slice(i, i + MAX_PARALLEL_WORKERS);
+          const batchPromises = batch.map(seg =>
+            transcodeSegment({
+              inputPath: originalPath,
+              hlsDir,
+              segmentIndex: seg.index,
+              startTime: seg.startTime,
+              duration: seg.duration,
+              mapArgs
+            })
+          );
+          const batchResults = await Promise.all(batchPromises);
+          results.push(...batchResults);
+        }
+
+        // 5. 检查是否有失败的分片
+        const failedSegments = results.filter(r => !r.success);
+        if (failedSegments.length > 0) {
+          console.error(`${failedSegments.length} 个分片转码失败`);
+          throw new Error(`分片转码失败: ${failedSegments.map(s => s.segmentIndex).join(', ')}`);
+        }
+
+        // 6. 合并播放列表
+        console.log('合并 HLS 播放列表...');
+        mergeHlsPlaylists(hlsDir, results, audioStreams);
+
+        console.log(`HLS 并行转换完成: ${masterUrl}`);
 
         // 删除原文件
         fs.unlink(originalPath, (err) => {
@@ -359,10 +478,67 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
           filename: originalName,
           size: req.file.size,
           hls: true,
-          audioTracks: numAudio
+          audioTracks: audioStreams.length,
+          parallelSegments: numSegments
         });
-      });
-    });
+
+      } catch (error) {
+        console.error(`HLS 并行转换失败: ${error.message}`);
+
+        // 降级：尝试单进程转码
+        console.log('尝试降级为单进程转码...');
+
+        const audioStreams = await getAudioStreams(originalPath);
+        let mapArgs = '-map 0:v:0';
+        for (let i = 0; i < audioStreams.length; i++) {
+          mapArgs += ` -map 0:a:${i}?`;
+        }
+
+        const fallbackCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
+          `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
+          `-c:a aac -b:a 128k -ac 2 ` +
+          `-f hls -hls_time 4 -hls_list_size 0 ` +
+          `-hls_segment_type mpegts ` +
+          `-hls_flags independent_segments ` +
+          `-hls_segment_filename "${hlsDir}/seg_%04d.ts" ` +
+          `"${hlsDir}/stream_v.m3u8"`;
+
+        try {
+          await execAsync(fallbackCmd, { maxBuffer: 1024 * 1024 * 50 });
+
+          // 生成简单的 master.m3u8
+          const masterContent = '#EXTM3U\n#EXT-X-VERSION:3\n\n' +
+            '#EXT-X-STREAM-INF:BANDWIDTH=2000000\nstream_v.m3u8\n';
+          fs.writeFileSync(path.join(hlsDir, 'master.m3u8'), masterContent);
+
+          fs.unlink(originalPath, () => { });
+
+          res.json({
+            success: true,
+            url: masterUrl,
+            filename: originalName,
+            size: req.file.size,
+            hls: true,
+            audioTracks: audioStreams.length,
+            fallback: true
+          });
+        } catch (fallbackErr) {
+          console.error('降级转码也失败:', fallbackErr.message);
+
+          // 最终降级：直接返回原文件
+          const fileUrl = `/uploads/${req.file.filename}`;
+          res.json({
+            success: true,
+            url: fileUrl,
+            filename: originalName,
+            size: req.file.size,
+            hls: false
+          });
+
+          fs.rm(hlsDir, { recursive: true, force: true }, () => { });
+        }
+      }
+    })();
   } else {
     // 其他格式直接返回
     const fileUrl = `/uploads/${req.file.filename}`;
