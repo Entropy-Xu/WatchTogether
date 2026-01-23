@@ -234,8 +234,8 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     console.log(`开始 HLS 转换: ${originalName}...`);
 
     // 使用 ffprobe 检测音轨数量和元数据 (JSON 输出)
-    // 使用宝塔面板安装的 ffmpeg 路径
-    const ffmpegDir = '/www/server/ffmpeg/ffmpeg-6.1';
+    // 使用自编译的 ffmpeg (完整多线程支持)
+    const ffmpegDir = '/usr/local/bin';
     const ffprobePath = `${ffmpegDir}/ffprobe`;
     const ffmpegPath = `${ffmpegDir}/ffmpeg`;
     // 获取音轨的 index, codec, title, language
@@ -305,23 +305,24 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:${trackName}`;
       }
 
-      // HEVC (H.265) 多核优化参数 - 比 x264 更好的多线程支持
-      // pools=32: 编码线程池大小
-      // frame-threads=8: 帧级并行线程
-      // wpp=1: 波前并行处理
-      // pmode=1: 并行模式编码
-      // pme=1: 并行运动估计
-      const x265Params = 'pools=32:frame-threads=8:wpp=1:pmode=1:pme=1';
+      // x264 多核优化参数 (32核服务器)
+      // threads=0: 自动检测最大线程
+      // sliced-threads=1: 启用切片级多线程 (关键!)
+      // aq-mode=3: 自适应量化 (更高计算量)
+      // subme=9: 最高精度的子像素运动估计
+      // me=umh: 更精确的运动估计算法
+      // ref=5: 更多参考帧 (更高计算量)
+      const x264Params = 'threads=0:sliced-threads=1:aq-mode=3:subme=9:me=umh:ref=5';
 
       const ffmpegCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
-        `-c:v libx265 -preset fast -crf 26 -tag:v hvc1 -x265-params ${x265Params} ` +
+        `-c:v libx264 -preset medium -tune film -crf 22 -x264opts ${x264Params} ` +
         `-c:a aac -b:a 192k -ac 2 ` +
         `-f hls ` +
         `-hls_time 4 ` +
         `-hls_list_size 0 ` +
-        `-hls_segment_type fmp4 ` +
+        `-hls_segment_type mpegts ` +
         `-hls_flags independent_segments ` +
-        `-hls_segment_filename "${hlsDir}/seg_%v_%04d.m4s" ` +
+        `-hls_segment_filename "${hlsDir}/seg_%v_%04d.ts" ` +
         `-master_pl_name master.m3u8 ` +
         `-var_stream_map "${varStreamMap}" ` +
         `"${hlsDir}/stream_%v.m3u8"`;
