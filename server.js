@@ -305,18 +305,15 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:${trackName}`;
       }
 
-      // x264 多核优化参数 (32核服务器)
-      // threads=0: 自动检测最大线程
-      // sliced-threads=1: 启用切片级多线程 (关键!)
-      // aq-mode=3: 自适应量化 (更高计算量)
-      // subme=9: 最高精度的子像素运动估计
-      // me=umh: 更精确的运动估计算法
-      // ref=5: 更多参考帧 (更高计算量)
-      const x264Params = 'threads=0:sliced-threads=1:aq-mode=3:subme=9:me=umh:ref=5';
+      // FFmpeg 转码优化参数 (速度优先)
+      // -threads 0: 自动检测最大线程，已足够让 H.264 跑满大部分 CPU
+      // -preset veryfast: 速度优先预设，比 medium 快 4-5 倍
+      // -crf 23: 质量控制 (稍高一点换取更小码率和更快速度)
+      // 移除高负载 x264opts，让 x264 自动优化线程管理
 
       const ffmpegCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
-        `-c:v libx264 -preset medium -tune film -crf 22 -x264opts ${x264Params} ` +
-        `-c:a aac -b:a 192k -ac 2 ` +
+        `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
+        `-c:a aac -b:a 128k -ac 2 ` +
         `-f hls ` +
         `-hls_time 4 ` +
         `-hls_list_size 0 ` +
