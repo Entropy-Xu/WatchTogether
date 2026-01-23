@@ -486,10 +486,32 @@ io.on('connection', (socket) => {
           setTimeout(() => {
             const r = rooms.get(currentRoom);
             if (r && r.users.size === 0) {
+              // 清理上传的文件
+              try {
+                if (r.videoUrl && r.videoUrl.startsWith('/uploads/')) {
+                  const filename = path.basename(r.videoUrl);
+                  const filePath = path.join(uploadsDir, filename);
+                  if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    console.log(`清理文件: ${filename}`);
+                  }
+                }
+                if (r.subtitleUrl && r.subtitleUrl.startsWith('/uploads/')) {
+                  const filename = path.basename(r.subtitleUrl);
+                  const filePath = path.join(uploadsDir, filename);
+                  if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    console.log(`清理字幕: ${filename}`);
+                  }
+                }
+              } catch (e) {
+                console.error('清理文件失败:', e);
+              }
+
               rooms.delete(currentRoom);
               console.log(`房间 ${currentRoom} 已删除（无人）`);
             }
-          }, 60000); // 1分钟后删除空房间
+          }, 600000); // 10分钟后删除空房间，防止网络波动导致房间消失
         }
       }
     }

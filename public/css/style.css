@@ -1246,6 +1246,20 @@ ul {
     gap: 1rem;
   }
 
+  .host-badge {
+    color: #fbbf24;
+    /* 金色 */
+    margin-left: auto;
+    font-size: 0.9rem;
+  }
+
+  /* 移动端隐藏邀请文字 */
+  @media (max-width: 767px) {
+    .d-none-mobile {
+      display: none;
+    }
+  }
+
   .room-header {
     padding: 0.5rem 1rem;
   }

@@ -293,6 +293,20 @@ function initVideoPlayer() {
             },
             nativeAudioTracks: false,
             nativeVideoTracks: false
+        },
+        controlBar: {
+            children: [
+                'playToggle',
+                'volumePanel',
+                'currentTimeDisplay',
+                'timeDivider',
+                'durationDisplay',
+                'progressControl',
+                'audioTrackButton', // 多声道支持
+                'subsCapsButton',
+                'qualitySelector',
+                'fullscreenToggle',
+            ]
         }
     });
 
@@ -322,7 +336,7 @@ function initVideoPlayer() {
     });
 }
 
-function loadVideo(url) {
+function loadVideo(url, startTime = 0, autoPlay = false) {
     if (!player || !url) return;
 
     // 隐藏占位符，显示播放器
@@ -342,7 +356,7 @@ function loadVideo(url) {
         '.webm': 'video/webm',
         '.ogg': 'video/ogg',
         '.ogv': 'video/ogg',
-        '.mkv': 'video/mp4', // MKV 尝试用 mp4 类型播放（如果编码兼容）
+        '.mkv': 'video/mp4', // MKV 尝试用 mp4 类型播放
         '.avi': 'video/mp4',
         '.flv': 'video/mp4',
         '.wmv': 'video/mp4',
@@ -372,20 +386,37 @@ function loadVideo(url) {
     // 加载并准备播放
     player.load();
 
-    // 添加加载事件监听
+    // 添加加载事件监听 - 关键修复：确保在元数据加载后跳转
     player.one('loadedmetadata', () => {
-        console.log('视频元数据已加载');
+        console.log('视频元数据已加载，准备跳转');
+
+        if (startTime > 0) {
+            player.currentTime(startTime);
+        }
+
+        if (autoPlay) {
+            const playPromise = player.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.log("自动播放被拦截 (需用户交互):", error);
+                    showToast('请点击播放开始观看', 'info');
+                });
+            }
+        }
+
         updateSyncStatus('', '已同步');
+
+        // 延迟解除同步锁定，防止 seek 触发事件
+        setTimeout(() => {
+            isSyncing = false;
+        }, 1000);
     });
 
     player.one('error', (e) => {
         console.error('视频加载错误:', player.error());
         showToast('视频加载失败，可能是格式不支持或编码不兼容', 'error');
-    });
-
-    setTimeout(() => {
         isSyncing = false;
-    }, 1000);
+    });
 }
 
 // ==========================================
@@ -656,9 +687,28 @@ function updateUserList(users) {
     <li>
       <div class="user-avatar">${getInitial(user.name)}</div>
       <span class="user-name">${escapeHtml(user.name)}</span>
-      ${user.isHost ? '<span class="host-badge">房主</span>' : ''}
+      ${user.isHost ? '<span class="host-badge" title="房主 (管理员)"><i class="fa-solid fa-crown"></i></span>' : ''}
     </li>
   `).join('');
+}
+
+// ==========================================
+// 邀请功能
+// ==========================================
+function copyInviteLink() {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(() => {
+        showToast('邀请链接已复制', 'success');
+    }).catch(() => {
+        // 降级方案
+        const input = document.createElement('input');
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        showToast('邀请链接已复制', 'success');
+    });
 }
 
 // ==========================================
