@@ -305,23 +305,23 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:${trackName}`;
       }
 
-      // 多核优化参数 (32核 - 全力压榨)
-      // threads=32: 使用全部核心
-      // sliced-threads=1: 启用切片级多线程
-      // lookahead_threads=8: 预读线程
-      // b-adapt=2: 自适应 B 帧 (更高计算量)
-      // rc-lookahead=60: 更长的预读帧数 (更高质量)
-      const x264Params = 'threads=32:sliced-threads=1:lookahead_threads=8:b-adapt=2:rc-lookahead=60';
+      // HEVC (H.265) 多核优化参数 - 比 x264 更好的多线程支持
+      // pools=32: 编码线程池大小
+      // frame-threads=8: 帧级并行线程
+      // wpp=1: 波前并行处理
+      // pmode=1: 并行模式编码
+      // pme=1: 并行运动估计
+      const x265Params = 'pools=32:frame-threads=8:wpp=1:pmode=1:pme=1';
 
       const ffmpegCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
-        `-c:v libx264 -preset slow -crf 22 -x264opts ${x264Params} ` +
+        `-c:v libx265 -preset fast -crf 26 -tag:v hvc1 -x265-params ${x265Params} ` +
         `-c:a aac -b:a 192k -ac 2 ` +
         `-f hls ` +
         `-hls_time 4 ` +
         `-hls_list_size 0 ` +
-        `-hls_segment_type mpegts ` +
+        `-hls_segment_type fmp4 ` +
         `-hls_flags independent_segments ` +
-        `-hls_segment_filename "${hlsDir}/seg_%v_%04d.ts" ` +
+        `-hls_segment_filename "${hlsDir}/seg_%v_%04d.m4s" ` +
         `-master_pl_name master.m3u8 ` +
         `-var_stream_map "${varStreamMap}" ` +
         `"${hlsDir}/stream_%v.m3u8"`;
