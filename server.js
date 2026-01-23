@@ -234,7 +234,11 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     console.log(`开始 HLS 转换: ${originalName}...`);
 
     // 使用 ffprobe 检测音轨数量 (JSON 输出更可靠)
-    const probeCmd = `ffprobe -v error -select_streams a -show_entries stream=index,codec_name -of json "${originalPath}"`;
+    // 使用宝塔面板安装的 ffmpeg 路径
+    const ffmpegDir = '/www/server/ffmpeg/ffmpeg-6.1';
+    const ffprobePath = `${ffmpegDir}/ffprobe`;
+    const ffmpegPath = `${ffmpegDir}/ffmpeg`;
+    const probeCmd = `${ffprobePath} -v error -select_streams a -show_entries stream=index,codec_name -of json "${originalPath}"`;
     console.log('ffprobe 命令:', probeCmd);
 
     exec(probeCmd, (probeErr, probeOut, probeStderr) => {
@@ -288,7 +292,7 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
       // 多核优化参数 (28核)
       const x264Params = 'threads=28:sliced-threads=1:lookahead_threads=8';
 
-      const ffmpegCmd = `ffmpeg -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
+      const ffmpegCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
         `-c:v libx264 -preset fast -crf 23 -x264opts ${x264Params} ` +
         `-c:a aac -b:a 192k -ac 2 ` +
         `-f hls ` +
