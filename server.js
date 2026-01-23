@@ -235,10 +235,22 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
     // 使用 ffprobe 检测音轨数量 (JSON 输出更可靠)
     const probeCmd = `ffprobe -v error -select_streams a -show_entries stream=index,codec_name -of json "${originalPath}"`;
-    exec(probeCmd, (probeErr, probeOut) => {
+    console.log('ffprobe 命令:', probeCmd);
+
+    exec(probeCmd, (probeErr, probeOut, probeStderr) => {
       let numAudio = 1;
+
+      // 调试输出
+      if (probeErr) {
+        console.error('ffprobe 错误:', probeErr.message);
+      }
+      if (probeStderr) {
+        console.error('ffprobe stderr:', probeStderr);
+      }
+      console.log('ffprobe 原始输出:', probeOut);
+
       try {
-        if (!probeErr && probeOut.trim()) {
+        if (!probeErr && probeOut && probeOut.trim()) {
           const probeData = JSON.parse(probeOut);
           if (probeData.streams && probeData.streams.length > 0) {
             numAudio = probeData.streams.length;
@@ -246,7 +258,8 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
           }
         }
       } catch (parseErr) {
-        console.error('ffprobe 解析失败:', parseErr.message);
+        console.error('ffprobe JSON 解析失败:', parseErr.message);
+        console.error('原始输出:', probeOut);
       }
 
       console.log(`检测到 ${numAudio} 个音轨`);
@@ -272,8 +285,8 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:Audio${i + 1}`;
       }
 
-      // 多核优化参数
-      const x264Params = 'threads=16:sliced-threads=1:lookahead_threads=4';
+      // 多核优化参数 (28核)
+      const x264Params = 'threads=28:sliced-threads=1:lookahead_threads=8';
 
       const ffmpegCmd = `ffmpeg -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
         `-c:v libx264 -preset fast -crf 23 -x264opts ${x264Params} ` +
