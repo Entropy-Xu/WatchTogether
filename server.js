@@ -305,11 +305,16 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         varStreamMap += ` a:${i},agroup:audio,name:${trackName}`;
       }
 
-      // 多核优化参数 (28核)
-      const x264Params = 'threads=28:sliced-threads=1:lookahead_threads=8';
+      // 多核优化参数 (32核 - 全力压榨)
+      // threads=32: 使用全部核心
+      // sliced-threads=1: 启用切片级多线程
+      // lookahead_threads=8: 预读线程
+      // b-adapt=2: 自适应 B 帧 (更高计算量)
+      // rc-lookahead=60: 更长的预读帧数 (更高质量)
+      const x264Params = 'threads=32:sliced-threads=1:lookahead_threads=8:b-adapt=2:rc-lookahead=60';
 
       const ffmpegCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
-        `-c:v libx264 -preset fast -crf 23 -x264opts ${x264Params} ` +
+        `-c:v libx264 -preset slow -crf 22 -x264opts ${x264Params} ` +
         `-c:a aac -b:a 192k -ac 2 ` +
         `-f hls ` +
         `-hls_time 4 ` +
