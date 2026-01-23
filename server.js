@@ -219,53 +219,99 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     return; // 结束字幕处理
   }
 
-  // 仅对 MP4, MOV, MKV 进行 faststart 优化
-  // 注意：这里我们统一转为 mp4 容器以确保最佳兼容性
-  if (['.mp4', '.mov', '.mkv'].includes(ext)) {
-    const filenameNoExt = path.basename(req.file.filename, path.extname(req.file.filename));
-    const optimizedFilename = `${filenameNoExt}_optimized.mp4`;
-    const optimizedPath = path.join(uploadsDir, optimizedFilename);
-    const optimizedUrl = `/uploads/${optimizedFilename}`;
+  // HLS 多音轨转换 (MP4, MOV, MKV)
+  if (['.mp4', '.mov', '.mkv', '.avi', '.wmv', '.flv'].includes(ext)) {
+    const videoId = path.basename(req.file.filename, path.extname(req.file.filename));
+    const hlsDir = path.join(uploadsDir, videoId);
+    const masterPlaylist = path.join(hlsDir, 'master.m3u8');
+    const masterUrl = `/uploads/${videoId}/master.m3u8`;
 
-    console.log(`开始优化视频: ${originalName}...`);
+    // 创建 HLS 目录
+    if (!fs.existsSync(hlsDir)) {
+      fs.mkdirSync(hlsDir, { recursive: true });
+    }
 
-    // 使用 ffmpeg 进行 faststart 优化
-    // -c copy: 不重新编码，只复制流（速度快）
-    // -movflags +faststart: 移动 moov atom 到文件头
-    exec(`ffmpeg -i "${originalPath}" -c copy -movflags +faststart "${optimizedPath}"`, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`优化失败: ${error.message}`);
-        // 优化失败则降级使用原文件
-        const fileUrl = `/uploads/${req.file.filename}`;
-        res.json({
-          success: true,
-          url: fileUrl,
-          filename: originalName,
-          size: req.file.size,
-          optimized: false
-        });
-        return;
+    console.log(`开始 HLS 转换: ${originalName}...`);
+
+    // 使用 ffprobe 检测音轨数量
+    exec(`ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "${originalPath}"`, (probeErr, probeOut) => {
+      let audioTracks = [];
+      if (!probeErr && probeOut.trim()) {
+        audioTracks = probeOut.trim().split('\n').filter(Boolean);
+      }
+      const numAudio = Math.max(audioTracks.length, 1);
+
+      console.log(`检测到 ${numAudio} 个音轨`);
+
+      // 构建 FFmpeg 命令
+      // -threads 0: 使用所有 CPU 核心
+      // -c:v copy: 视频流直接复制 (无需重编码)
+      // -c:a aac: 音频转 AAC (HLS 兼容)
+      // -hls_time 10: 每个片段 10 秒
+      // -hls_list_size 0: 完整播放列表
+
+      let mapArgs = '-map 0:v:0';
+      let varStreamMap = 'v:0,agroup:audio';
+
+      for (let i = 0; i < numAudio; i++) {
+        mapArgs += ` -map 0:a:${i}?`;
+        varStreamMap += ` a:${i},agroup:audio,name:Audio${i + 1}`;
       }
 
-      console.log(`视频优化完成: ${optimizedUrl}`);
+      const ffmpegCmd = `ffmpeg -i "${originalPath}" ${mapArgs} ` +
+        `-c:v copy -c:a aac ` +
+        `-threads 0 ` +
+        `-f hls ` +
+        `-hls_time 10 ` +
+        `-hls_list_size 0 ` +
+        `-hls_segment_filename "${hlsDir}/segment_%v_%03d.ts" ` +
+        `-master_pl_name master.m3u8 ` +
+        `-var_stream_map "${varStreamMap}" ` +
+        `"${hlsDir}/stream_%v.m3u8"`;
 
-      // 删除原文件（可选，为了节省空间）
-      fs.unlink(originalPath, (err) => {
-        if (err) console.error('删除原文件失败:', err);
-      });
+      console.log('FFmpeg 命令:', ffmpegCmd);
 
-      res.json({
-        success: true,
-        url: optimizedUrl,
-        filename: originalName,
-        size: req.file.size, // 注意：这是原大小，优化后可能略有不同
-        optimized: true
+      exec(ffmpegCmd, { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`HLS 转换失败: ${error.message}`);
+          console.error('FFmpeg stderr:', stderr);
+
+          // 降级：直接返回原文件
+          const fileUrl = `/uploads/${req.file.filename}`;
+          res.json({
+            success: true,
+            url: fileUrl,
+            filename: originalName,
+            size: req.file.size,
+            hls: false
+          });
+
+          // 清理空目录
+          fs.rmdir(hlsDir, { recursive: true }, () => { });
+          return;
+        }
+
+        console.log(`HLS 转换完成: ${masterUrl}`);
+
+        // 删除原文件
+        fs.unlink(originalPath, (err) => {
+          if (err) console.error('删除原文件失败:', err);
+        });
+
+        res.json({
+          success: true,
+          url: masterUrl,
+          filename: originalName,
+          size: req.file.size,
+          hls: true,
+          audioTracks: numAudio
+        });
       });
     });
   } else {
     // 其他格式直接返回
     const fileUrl = `/uploads/${req.file.filename}`;
-    console.log(`视频上传成功 (未优化): ${originalName} -> ${fileUrl}`);
+    console.log(`视频上传成功 (未处理): ${originalName} -> ${fileUrl}`);
     res.json({
       success: true,
       url: fileUrl,
@@ -441,6 +487,12 @@ io.on('connection', (socket) => {
     });
   });
 
+  // 字幕轨道同步
+  socket.on('sync-subtitle-track', ({ trackIndex }) => {
+    if (!currentRoom) return;
+    socket.to(currentRoom).emit('sync-subtitle-track', { trackIndex });
+  });
+
   // 请求同步（新加入用户）
   socket.on('request-sync', () => {
     if (!currentRoom) return;
@@ -489,11 +541,23 @@ io.on('connection', (socket) => {
               // 清理上传的文件
               try {
                 if (r.videoUrl && r.videoUrl.startsWith('/uploads/')) {
-                  const filename = path.basename(r.videoUrl);
-                  const filePath = path.join(uploadsDir, filename);
-                  if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                    console.log(`清理文件: ${filename}`);
+                  // HLS 目录或单个文件
+                  const urlPath = r.videoUrl.replace('/uploads/', '');
+                  if (urlPath.includes('/')) {
+                    // HLS: 删除整个目录
+                    const dirName = urlPath.split('/')[0];
+                    const dirPath = path.join(uploadsDir, dirName);
+                    if (fs.existsSync(dirPath)) {
+                      fs.rmSync(dirPath, { recursive: true, force: true });
+                      console.log(`清理 HLS 目录: ${dirName}`);
+                    }
+                  } else {
+                    // 单个文件
+                    const filePath = path.join(uploadsDir, urlPath);
+                    if (fs.existsSync(filePath)) {
+                      fs.unlinkSync(filePath);
+                      console.log(`清理文件: ${urlPath}`);
+                    }
                   }
                 }
                 if (r.subtitleUrl && r.subtitleUrl.startsWith('/uploads/')) {

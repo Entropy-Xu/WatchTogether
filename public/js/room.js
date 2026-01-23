@@ -73,23 +73,53 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     roomId = urlParams.get('id') || sessionStorage.getItem('roomId');
     userName = sessionStorage.getItem('userName');
-    isHost = sessionStorage.getItem('isHost') === 'true';
 
-    if (!roomId || !userName) {
+    // 邀请链接逻辑：如果没有 roomId，回首页
+    if (!roomId) {
         alert('请先从首页进入放映室');
         window.location.href = '/';
         return;
     }
 
-    // 显示房间号
     document.getElementById('room-id-display').textContent = roomId;
 
-    // 初始化
+    // 邀请链接逻辑：如果有 roomId 但没有 userName，显示加入弹窗
+    if (!userName) {
+        const modal = document.getElementById('join-modal');
+        const nameInput = document.getElementById('join-name-input');
+        const joinBtn = document.getElementById('join-btn');
+
+        modal.style.display = 'flex';
+
+        const joinAction = () => {
+            const name = nameInput.value.trim();
+            if (name) {
+                userName = name;
+                sessionStorage.setItem('userName', name);
+                sessionStorage.setItem('roomId', roomId);
+                modal.style.display = 'none';
+                startRoom();
+            } else {
+                alert('请输入昵称');
+            }
+        };
+
+        joinBtn.addEventListener('click', joinAction);
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') joinAction();
+        });
+    } else {
+        startRoom();
+    }
+});
+
+function startRoom() {
+    isHost = sessionStorage.getItem('isHost') === 'true'; // 重新获取可能更新的状态
     initSocket();
     initVideoPlayer();
     initEventListeners();
-    initDanmakuControl(); // Danmaku
-});
+    initDanmakuControl();
+}
 
 // ==========================================
 // Socket.io 连接
@@ -142,6 +172,23 @@ function initSocket() {
         setSubtitle(url);
         showNotification(`${changedBy} 加载了字幕: ${filename}`);
         addSystemMessage(`${changedBy} 加载了字幕: ${filename}`);
+    });
+
+    // 字幕轨道同步
+    socket.on('sync-subtitle-track', ({ trackIndex }) => {
+        if (!player) return;
+        isSyncing = true;
+        const tracks = player.textTracks();
+
+        for (let i = 0; i < tracks.length; i++) {
+            if (i === trackIndex) {
+                tracks[i].mode = 'showing';
+            } else {
+                tracks[i].mode = 'disabled';
+            }
+        }
+
+        setTimeout(() => isSyncing = false, 500);
     });
 
     // 同步播放
@@ -330,10 +377,15 @@ function initVideoPlayer() {
         socket.emit('video-seek', { currentTime: player.currentTime() });
     });
 
-    // 错误处理
     player.on('error', () => {
         showToast('视频加载失败，请检查链接是否有效', 'error');
     });
+
+    // 修复：将弹幕容器移动到 Video.js 容器内，以便全屏时显示
+    const dmContainer = document.getElementById('danmaku-container');
+    if (dmContainer) {
+        player.el().appendChild(dmContainer);
+    }
 }
 
 function loadVideo(url, startTime = 0, autoPlay = false) {
@@ -356,7 +408,7 @@ function loadVideo(url, startTime = 0, autoPlay = false) {
         '.webm': 'video/webm',
         '.ogg': 'video/ogg',
         '.ogv': 'video/ogg',
-        '.mkv': 'video/mp4', // MKV 尝试用 mp4 类型播放
+        '.mkv': 'video/mp4',
         '.avi': 'video/mp4',
         '.flv': 'video/mp4',
         '.wmv': 'video/mp4',
@@ -375,48 +427,96 @@ function loadVideo(url, startTime = 0, autoPlay = false) {
 
     isSyncing = true;
 
+    // 清除旧的 HLS 实例
+    if (player.hlsInstance) {
+        player.hlsInstance.destroy();
+        player.hlsInstance = null;
+    }
+
     // 先重置播放器
     player.reset();
 
-    player.src({
-        src: url,
-        type: type
-    });
+    // HLS 处理 (使用 hls.js 库)
+    if (type === 'application/x-mpegURL' && typeof Hls !== 'undefined' && Hls.isSupported()) {
+        console.log('使用 hls.js 加载 HLS 流');
 
-    // 加载并准备播放
-    player.load();
+        const videoElement = player.tech({ IWillNotUseThisInPlugins: true }).el();
+        const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false
+        });
 
-    // 添加加载事件监听 - 关键修复：确保在元数据加载后跳转
-    player.one('loadedmetadata', () => {
-        console.log('视频元数据已加载，准备跳转');
+        hls.loadSource(url);
+        hls.attachMedia(videoElement);
 
-        if (startTime > 0) {
-            player.currentTime(startTime);
-        }
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            console.log('HLS 清单已解析，音轨数量:', hls.audioTracks.length);
 
-        if (autoPlay) {
-            const playPromise = player.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.log("自动播放被拦截 (需用户交互):", error);
+            if (startTime > 0) {
+                player.currentTime(startTime);
+            }
+
+            if (autoPlay) {
+                player.play().catch(e => {
+                    console.log('自动播放被拦截:', e);
                     showToast('请点击播放开始观看', 'info');
                 });
             }
-        }
 
-        updateSyncStatus('', '已同步');
+            updateSyncStatus('', '已同步');
+            setTimeout(() => { isSyncing = false; }, 1000);
+        });
 
-        // 延迟解除同步锁定，防止 seek 触发事件
-        setTimeout(() => {
+        hls.on(Hls.Events.ERROR, (event, data) => {
+            console.error('HLS 错误:', data);
+            if (data.fatal) {
+                showToast('视频加载失败', 'error');
+                isSyncing = false;
+            }
+        });
+
+        // 存储 hls 实例以便后续操作
+        player.hlsInstance = hls;
+
+    } else {
+        // 非 HLS 或 Safari 原生支持
+        player.src({
+            src: url,
+            type: type
+        });
+
+        player.load();
+
+        player.one('loadedmetadata', () => {
+            console.log('视频元数据已加载，准备跳转');
+
+            if (startTime > 0) {
+                player.currentTime(startTime);
+            }
+
+            if (autoPlay) {
+                const playPromise = player.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.log("自动播放被拦截 (需用户交互):", error);
+                        showToast('请点击播放开始观看', 'info');
+                    });
+                }
+            }
+
+            updateSyncStatus('', '已同步');
+
+            setTimeout(() => {
+                isSyncing = false;
+            }, 1000);
+        });
+
+        player.one('error', (e) => {
+            console.error('视频加载错误:', player.error());
+            showToast('视频加载失败，可能是格式不支持或编码不兼容', 'error');
             isSyncing = false;
-        }, 1000);
-    });
-
-    player.one('error', (e) => {
-        console.error('视频加载错误:', player.error());
-        showToast('视频加载失败，可能是格式不支持或编码不兼容', 'error');
-        isSyncing = false;
-    });
+        });
+    }
 }
 
 // ==========================================
