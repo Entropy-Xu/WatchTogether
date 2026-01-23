@@ -2,7 +2,8 @@
 
 一个极简、现代化的在线电影同步放映室。邀请朋友，共享观影时光。
 
-![](public/favicon.ico) *（此处可放项目截图）*
+![](public/favicon.ico) <img width="2222" height="1183" alt="image" src="https://github.com/user-attachments/assets/46691c24-d448-48ab-ba28-b914c46bd08e" />
+
 
 ## ✨ 核心特性 (Key Features)
 
