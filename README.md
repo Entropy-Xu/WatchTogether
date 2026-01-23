@@ -323,7 +323,8 @@ OnlineMediaPlayer/
 ├── uploads/               # 上传文件存储目录（运行时创建）
 ├── server.js              # Node.js 服务器主文件
 ├── package.json           # 项目依赖配置
-├── README.md              # 项目说明文档
+├── README.md              # 项目说明文档（中文）
+├── README_EN.md           # 项目说明文档（英文）
 └── DEPLOY_BAOTA.md        # 宝塔面板部署指南
 ```
 

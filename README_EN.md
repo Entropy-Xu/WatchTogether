@@ -329,9 +329,9 @@ OnlineMediaPlayer/
 ├── uploads/               # Upload storage directory (created at runtime)
 ├── server.js              # Node.js server main file
 ├── package.json           # Project dependencies
-├── README.md              # Project documentation (Chinese)
-├── README_EN.md           # Project documentation (English)
-└── DEPLOY_BAOTA.md        # Baota Panel deployment guide
+├── README.md              # Project documentation (Chinese version)
+├── README_EN.md           # Project documentation (English version)
+└── DEPLOY_BAOTA.md        # Baota Panel deployment guide (Chinese)
 ```
 
 ### Core Modules
