@@ -167,6 +167,32 @@ const MAX_PARALLEL_WORKERS = Math.max(2, Math.floor(os.cpus().length / 2));
 
 console.log(`并行转码配置: 每片 ${SEGMENT_DURATION}s, 最大 ${MAX_PARALLEL_WORKERS} 并行进程`);
 
+// ============ 转码进度追踪 ============
+// 存储转码进度 { uploadId -> { filename, stage, progress, message, ... } }
+const transcodeProgress = new Map();
+
+/**
+ * 发送转码进度到前端
+ */
+function emitProgress(uploadId, data) {
+  const progressData = {
+    uploadId,
+    filename: data.filename || '',
+    stage: data.stage || 'processing', // 'analyzing', 'transcoding', 'merging', 'complete', 'error'
+    progress: data.progress || 0,       // 0-100
+    message: data.message || '',
+    segmentInfo: data.segmentInfo || null, // { current, total, completed }
+    ...data
+  };
+
+  transcodeProgress.set(uploadId, progressData);
+
+  // 广播给所有连接的客户端
+  io.emit('transcode-progress', progressData);
+
+  console.log(`[进度] ${uploadId}: ${progressData.stage} - ${progressData.progress}% - ${progressData.message}`);
+}
+
 /**
  * 获取视频时长 (秒)
  */
@@ -212,6 +238,7 @@ async function transcodeSegment(opts) {
 
   const ffmpegCmd = `${ffmpegPath} -y -threads 0 ` +
     `-ss ${startTimeStr} -t ${duration} -i "${inputPath}" ${mapArgs} ` +
+    `-output_ts_offset ${startTime} ` +
     `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
     `-c:a aac -b:a 128k -ac 2 ` +
     `-f hls -hls_time 4 -hls_list_size 0 ` +
@@ -396,12 +423,23 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
     const hlsDir = path.join(uploadsDir, videoId);
     const masterUrl = `/uploads/${videoId}/master.m3u8`;
 
+    // 使用 videoId 作为进度追踪 ID
+    const uploadId = videoId;
+
     // 创建 HLS 目录
     if (!fs.existsSync(hlsDir)) {
       fs.mkdirSync(hlsDir, { recursive: true });
     }
 
     console.log(`开始 HLS 并行转换: ${originalName}...`);
+
+    // 发送初始进度
+    emitProgress(uploadId, {
+      filename: originalName,
+      stage: 'analyzing',
+      progress: 0,
+      message: '正在分析视频...'
+    });
 
     // 使用 async IIFE 处理异步逻辑
     (async () => {
@@ -413,6 +451,13 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         ]);
 
         console.log(`视频时长: ${duration}s, 音轨数: ${audioStreams.length}`);
+
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'analyzing',
+          progress: 10,
+          message: `视频时长: ${Math.floor(duration / 60)}分${Math.floor(duration % 60)}秒, ${audioStreams.length} 个音轨`
+        });
 
         if (duration <= 0) {
           throw new Error('无法获取视频时长');
@@ -430,14 +475,24 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
         console.log(`分片计划: ${numSegments} 个分片, 并行度: ${Math.min(numSegments, MAX_PARALLEL_WORKERS)}`);
 
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'transcoding',
+          progress: 15,
+          message: `分片计划: ${numSegments} 个分片`,
+          segmentInfo: { current: 0, total: numSegments, completed: 0 }
+        });
+
         // 3. 构建 map 参数
         let mapArgs = '-map 0:v:0';
         for (let i = 0; i < audioStreams.length; i++) {
           mapArgs += ` -map 0:a:${i}?`;
         }
 
-        // 4. 并行转码 (限制并发数)
+        // 4. 并行转码 (限制并发数) - 带进度追踪
         const results = [];
+        let completedSegments = 0;
+
         for (let i = 0; i < segments.length; i += MAX_PARALLEL_WORKERS) {
           const batch = segments.slice(i, i + MAX_PARALLEL_WORKERS);
           const batchPromises = batch.map(seg =>
@@ -448,6 +503,18 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
               startTime: seg.startTime,
               duration: seg.duration,
               mapArgs
+            }).then(result => {
+              // 每个分片完成后更新进度
+              completedSegments++;
+              const progress = 15 + Math.floor((completedSegments / numSegments) * 75); // 15-90%
+              emitProgress(uploadId, {
+                filename: originalName,
+                stage: 'transcoding',
+                progress,
+                message: `转码分片 ${completedSegments}/${numSegments}`,
+                segmentInfo: { current: seg.index + 1, total: numSegments, completed: completedSegments }
+              });
+              return result;
             })
           );
           const batchResults = await Promise.all(batchPromises);
@@ -463,9 +530,27 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
         // 6. 合并播放列表
         console.log('合并 HLS 播放列表...');
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'merging',
+          progress: 92,
+          message: '正在合并播放列表...'
+        });
+
         mergeHlsPlaylists(hlsDir, results, audioStreams);
 
         console.log(`HLS 并行转换完成: ${masterUrl}`);
+
+        // 发送完成进度
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'complete',
+          progress: 100,
+          message: '转码完成！'
+        });
+
+        // 清理进度记录
+        setTimeout(() => transcodeProgress.delete(uploadId), 60000);
 
         // 删除原文件
         fs.unlink(originalPath, (err) => {
@@ -479,14 +564,30 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
           size: req.file.size,
           hls: true,
           audioTracks: audioStreams.length,
-          parallelSegments: numSegments
+          parallelSegments: numSegments,
+          uploadId
         });
 
       } catch (error) {
         console.error(`HLS 并行转换失败: ${error.message}`);
 
+        // 发送错误进度
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'error',
+          progress: 0,
+          message: `并行转码失败，尝试降级转码...`
+        });
+
         // 降级：尝试单进程转码
         console.log('尝试降级为单进程转码...');
+
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'transcoding',
+          progress: 10,
+          message: '降级为单进程转码...'
+        });
 
         const audioStreams = await getAudioStreams(originalPath);
         let mapArgs = '-map 0:v:0';
@@ -505,6 +606,13 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
         try {
           await execAsync(fallbackCmd, { maxBuffer: 1024 * 1024 * 50 });
+
+          emitProgress(uploadId, {
+            filename: originalName,
+            stage: 'complete',
+            progress: 100,
+            message: '转码完成！(降级模式)'
+          });
 
           // 生成简单的 master.m3u8
           const masterContent = '#EXTM3U\n#EXT-X-VERSION:3\n\n' +

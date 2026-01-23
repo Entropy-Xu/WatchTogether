@@ -271,6 +271,58 @@ function initSocket() {
             danmakuManager.add(message.text);
         }
     });
+
+    // 转码进度
+    socket.on('transcode-progress', (data) => {
+        const transcodeOverlay = document.getElementById('transcode-overlay');
+        const transcodeStatus = document.getElementById('transcode-status');
+        const transcodeProgress = document.getElementById('transcode-progress-bar');
+        const transcodeMessage = document.getElementById('transcode-message');
+
+        if (!transcodeOverlay) return;
+
+        // 显示转码覆盖层
+        if (data.stage !== 'complete') {
+            transcodeOverlay.style.display = 'flex';
+        }
+
+        // 更新状态文本
+        const stageText = {
+            'analyzing': '分析中',
+            'transcoding': '转码中',
+            'merging': '合并中',
+            'complete': '完成',
+            'error': '出错'
+        };
+
+        if (transcodeStatus) {
+            let statusHtml = `<span class="stage">${stageText[data.stage] || data.stage}</span>`;
+            if (data.segmentInfo) {
+                statusHtml += ` <span class="segment-info">(${data.segmentInfo.completed}/${data.segmentInfo.total})</span>`;
+            }
+            transcodeStatus.innerHTML = statusHtml;
+        }
+
+        // 更新进度条
+        if (transcodeProgress) {
+            transcodeProgress.style.width = `${data.progress}%`;
+            transcodeProgress.setAttribute('data-progress', `${data.progress}%`);
+        }
+
+        // 更新消息
+        if (transcodeMessage) {
+            transcodeMessage.textContent = data.message || '';
+        }
+
+        // 完成时隐藏
+        if (data.stage === 'complete') {
+            setTimeout(() => {
+                transcodeOverlay.style.display = 'none';
+            }, 1500);
+        }
+
+        console.log(`[转码进度] ${data.stage}: ${data.progress}% - ${data.message}`);
+    });
 }
 
 function joinRoom() {
