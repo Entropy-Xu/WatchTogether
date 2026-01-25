@@ -44,7 +44,7 @@ function showNotification(message) {
     }, 4000);
 }
 
-function formatTime(timestamp) {
+function formatMessageTime(timestamp) {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
@@ -67,6 +67,39 @@ function updateSyncStatus(status, text) {
 
     syncStatus.className = `sync-status ${status}`;
     syncText.textContent = text;
+    syncStatus.className = `sync-status ${status}`;
+    syncText.textContent = text;
+}
+
+// 获取或生成用户 ID (用于重连恢复房主身份)
+function getOrCreateUserId() {
+    let id = localStorage.getItem('mediaplayer_userid');
+    if (!id) {
+        // 生成简单的 UUID
+        id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+        localStorage.setItem('mediaplayer_userid', id);
+    }
+    return id;
+}
+
+// 更新播放器权限控制 UI
+function updatePlayerControls() {
+    const playerEl = document.getElementById('video-player');
+    if (!playerEl) return;
+
+    // 如果是房主，或者允许所有人控制，则启用控件
+    const canControl = isHost || roomSettings.allowAllControl;
+
+    if (canControl) {
+        playerEl.classList.remove('controls-disabled');
+    } else {
+        playerEl.classList.add('controls-disabled');
+    }
+
+    console.log(`[Permission] 更新权限控制: isHost=${isHost}, allowControl=${roomSettings.allowAllControl} => disabled=${!canControl}`);
 }
 
 // ==========================================
@@ -94,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const nameInput = document.getElementById('join-name-input');
         const joinBtn = document.getElementById('join-btn');
 
-        modal.style.display = 'flex';
+        modal.classList.add('show');
 
         const joinAction = () => {
             const name = nameInput.value.trim();
@@ -102,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 userName = name;
                 sessionStorage.setItem('userName', name);
                 sessionStorage.setItem('roomId', roomId);
-                modal.style.display = 'none';
+                modal.classList.remove('show');
                 startRoom();
             } else {
                 alert('请输入昵称');
@@ -166,8 +199,8 @@ function initSocket() {
     });
 
     // 视频更换
-    socket.on('video-changed', ({ url, changedBy }) => {
-        loadVideo(url);
+    socket.on('video-changed', ({ url, mseData, changedBy }) => {
+        loadVideo(url, mseData);
         showNotification(`${changedBy} 更换了视频`);
         addSystemMessage(`${changedBy} 更换了视频`);
     });
@@ -363,7 +396,8 @@ function initSocket() {
     // 房间设置更新
     socket.on('settings-updated', ({ settings, updatedBy }) => {
         roomSettings = settings;
-        showNotification(`${updatedBy} 更新了房间设置`);
+        showToast(`${updatedBy} 更新了房间设置`);
+        updatePlayerControls(); // 更新权限控制 UI
         // 如果设置模态框打开，更新开关状态
         updateSettingsUI();
     });
@@ -400,7 +434,10 @@ function initSocket() {
 function joinRoom() {
     showConnectionOverlay(true, '正在加入放映室...');
 
-    socket.emit('join-room', { roomId, userName }, (response) => {
+    // 发送 userId 以便后端识别用户身份
+    const userId = getOrCreateUserId();
+
+    socket.emit('join-room', { roomId, userName, userId }, (response) => {
         if (response.success) {
             showConnectionOverlay(false);
             updateSyncStatus('', '已同步');
@@ -417,6 +454,7 @@ function joinRoom() {
 
             // 更新 UI 显示
             updateHostUI();
+            updatePlayerControls(); // 初始化权限控制
             updateUserList(response.userList);
 
             // 加载现有视频
@@ -520,8 +558,18 @@ function initVideoPlayer() {
     }
 }
 
-function loadVideo(url, startTime = 0, autoPlay = false) {
+function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
     if (!player || !url) return;
+
+    // 兼容旧的调用方式 loadVideo(url, startTime, autoPlay)
+    let mseData = null;
+    let startTime = 0;
+
+    if (typeof mseDataOrStartTime === 'number') {
+        startTime = mseDataOrStartTime;
+    } else if (mseDataOrStartTime && typeof mseDataOrStartTime === 'object') {
+        mseData = mseDataOrStartTime;
+    }
 
     // 隐藏占位符，显示播放器
     document.getElementById('video-placeholder').style.display = 'none';
@@ -546,7 +594,8 @@ function loadVideo(url, startTime = 0, autoPlay = false) {
         '.wmv': 'video/mp4',
         '.m3u8': 'application/x-mpegURL',
         '.mpd': 'application/dash+xml',
-        '.ts': 'video/mp2t'
+        '.ts': 'video/mp2t',
+        '.m4s': 'video/mp4'
     };
 
     // 查找匹配的扩展名
@@ -565,11 +614,98 @@ function loadVideo(url, startTime = 0, autoPlay = false) {
         player.hlsInstance = null;
     }
 
+    // 清除旧的 MSE 资源
+    if (window.currentMseAudio) {
+        window.currentMseAudio.pause();
+        window.currentMseAudio.src = '';
+        window.currentMseAudio = null;
+    }
+
     // 先重置播放器
     player.reset();
 
-    // HLS 处理 (使用 hls.js 库)
-    if (type === 'application/x-mpegURL' && typeof Hls !== 'undefined' && Hls.isSupported()) {
+    // MSE 模式：分离的视频和音频
+    if (mseData && mseData.videoUrl && mseData.audioUrl) {
+        console.log('使用 MSE 模式播放分离的音视频');
+
+        // 创建隐藏的音频元素
+        const audioElement = document.createElement('audio');
+        audioElement.src = mseData.audioUrl;
+        audioElement.preload = 'auto';
+        window.currentMseAudio = audioElement;
+
+        // 设置视频源
+        player.src({
+            src: mseData.videoUrl,
+            type: 'video/mp4'
+        });
+
+        player.load();
+
+        // 同步音频与视频
+        const syncAudioWithVideo = () => {
+            if (!window.currentMseAudio) return;
+
+            // 同步时间
+            if (Math.abs(window.currentMseAudio.currentTime - player.currentTime()) > 0.3) {
+                window.currentMseAudio.currentTime = player.currentTime();
+            }
+        };
+
+        player.on('play', () => {
+            if (window.currentMseAudio) {
+                window.currentMseAudio.currentTime = player.currentTime();
+                window.currentMseAudio.play().catch(e => console.log('音频播放失败:', e));
+            }
+        });
+
+        player.on('pause', () => {
+            if (window.currentMseAudio) {
+                window.currentMseAudio.pause();
+            }
+        });
+
+        player.on('seeked', () => {
+            if (window.currentMseAudio) {
+                window.currentMseAudio.currentTime = player.currentTime();
+            }
+        });
+
+        player.on('ratechange', () => {
+            if (window.currentMseAudio) {
+                window.currentMseAudio.playbackRate = player.playbackRate();
+            }
+        });
+
+        // 定期同步
+        player.on('timeupdate', syncAudioWithVideo);
+
+        player.one('loadedmetadata', () => {
+            console.log('MSE 视频元数据已加载');
+
+            if (startTime > 0) {
+                player.currentTime(startTime);
+            }
+
+            if (autoPlay) {
+                player.play().catch(e => {
+                    console.log('自动播放被拦截:', e);
+                    showToast('请点击播放开始观看', 'info');
+                });
+            }
+
+            updateSyncStatus('', '已同步');
+            setTimeout(() => { isSyncing = false; }, 1000);
+        });
+
+        player.one('error', (e) => {
+            console.error('MSE 视频加载错误:', player.error());
+            showToast('视频加载失败', 'error');
+            isSyncing = false;
+        });
+
+        // HLS 处理 (使用 hls.js 库)
+    } else if (type === 'application/x-mpegURL' && typeof Hls !== 'undefined' && Hls.isSupported()) {
         console.log('使用 hls.js 加载 HLS 流');
 
         const videoElement = player.tech({ IWillNotUseThisInPlugins: true }).el();
@@ -971,7 +1107,7 @@ function addChatMessage(message, scroll = true) {
     messageEl.innerHTML = `
     <div class="message-header">
       <span class="message-author">${escapeHtml(message.userName)}</span>
-      <span class="message-time">${formatTime(message.timestamp)}</span>
+      <span class="message-time">${formatMessageTime(message.timestamp)}</span>
     </div>
     <div class="message-text">${escapeHtml(message.text)}</div>
   `;
@@ -1099,6 +1235,8 @@ function updateHostUI() {
         settingsBtn.style.display = 'none';
         console.log('[updateHostUI] 隐藏房主 UI');
     }
+
+    updatePlayerControls(); // 确保同时更新播放器控制权限
 }
 
 // 更新设置 UI
@@ -1407,8 +1545,17 @@ function initCustomControls() {
 
     controls.style.display = 'flex'; // 显示控件
 
+    // 权限检查辅助函数
+    function canControlPlayer() {
+        return isHost || roomSettings.allowAllControl;
+    }
+
     // Play/Pause
     function togglePlay() {
+        if (!canControlPlayer()) {
+            showToast('只有房主可以控制播放', 'error');
+            return;
+        }
         if (player.paused()) player.play();
         else player.pause();
     }
@@ -1421,8 +1568,8 @@ function initCustomControls() {
     function updateProgress() {
         const percent = (player.currentTime() / player.duration()) * 100;
         progressBarCurrent.style.width = percent + '%';
-        currentTimeEl.textContent = formatTime(player.currentTime());
-        durationEl.textContent = formatTime(player.duration());
+        currentTimeEl.textContent = formatDuration(player.currentTime());
+        durationEl.textContent = formatDuration(player.duration());
 
         const buffered = player.bufferedEnd();
         const bufferedPercent = (buffered / player.duration()) * 100;
@@ -1433,6 +1580,10 @@ function initCustomControls() {
     player.on('progress', updateProgress); // buffer update
 
     progressContainer.addEventListener('click', (e) => {
+        if (!canControlPlayer()) {
+            showToast('只有房主可以控制播放进度', 'error');
+            return;
+        }
         const rect = progressContainer.getBoundingClientRect();
         const pos = (e.clientX - rect.left) / rect.width;
         player.currentTime(pos * player.duration());
@@ -1462,6 +1613,10 @@ function initCustomControls() {
     // Speed
     document.querySelectorAll('.speed-option').forEach(opt => {
         opt.addEventListener('click', () => {
+            if (!canControlPlayer()) {
+                showToast('只有房主可以调整播放速度', 'error');
+                return;
+            }
             const speed = parseFloat(opt.dataset.speed);
             player.playbackRate(speed);
             speedDisplay.textContent = speed + 'x';
@@ -1539,7 +1694,7 @@ function initCustomControls() {
     initSubtitleSelector();
 }
 
-function formatTime(seconds) {
+function formatDuration(seconds) {
     if (isNaN(seconds)) return '00:00';
     const min = Math.floor(seconds / 60);
     const sec = Math.floor(seconds % 60);
@@ -1880,7 +2035,7 @@ async function playBilibiliVideo() {
     progressPercent.textContent = '0%';
 
     try {
-        // 调用后端下载并合并 API
+        // 调用后端下载 API
         const response = await fetch('/api/bilibili/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1898,16 +2053,27 @@ async function playBilibiliVideo() {
             throw new Error(result.error || '下载失败');
         }
 
-        const videoUrl = result.data.url;
-
         // 隐藏进度条
         progressContainer.style.display = 'none';
 
         // 关闭弹窗
         closeBilibiliVideoModal();
 
-        // 通知房间更换视频
-        socket.emit('change-video', { url: videoUrl });
+        // MSE 播放：传递分离的音视频 URL
+        if (result.data.type === 'mse') {
+            // 通知房间使用 MSE 播放
+            socket.emit('change-video', {
+                url: result.data.videoUrl,
+                mseData: {
+                    videoUrl: result.data.videoUrl,
+                    audioUrl: result.data.audioUrl,
+                    codecs: result.data.codecs
+                }
+            });
+        } else {
+            // 普通视频播放
+            socket.emit('change-video', { url: result.data.url });
+        }
 
         showToast(`正在加载: ${bilibiliVideoInfo.title}`, 'success');
 

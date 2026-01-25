@@ -97,7 +97,6 @@ const rooms = new Map();
 class Room {
   constructor(id, hostName) {
     this.id = id;
-    this.hostId = null;
     this.hostName = hostName;
     this.videoUrl = '';
     this.subtitleUrl = null; // 字幕 URL
@@ -117,24 +116,51 @@ class Room {
     };
     // 跟踪 B 站下载的文件（用于清理）
     this.bilibiliFiles = [];
+
+    // 房主的用户 ID (用于重连恢复权限)
+    this.hostUserId = null;
   }
 
-  addUser(socketId, name) {
+  /**
+   * 添加用户
+   * @param {string} socketId - Socket 连接 ID
+   * @param {string} name - 用户名
+   * @param {string} userId - 用户唯一标识 (前端生成)
+   */
+  addUser(socketId, name, userId) {
     this.users.set(socketId, {
       name,
+      userId, // 绑定 userId
       joinedAt: Date.now()
     });
-    if (!this.hostId) {
-      this.hostId = socketId;
+
+    // 如果没有房主，或者该用户就是房主（重连）
+    if (!this.hostUserId) {
+      this.hostUserId = userId;
     }
   }
 
+  /**
+   * 移除用户
+   * @param {string} socketId 
+   */
   removeUser(socketId) {
+    const user = this.users.get(socketId);
     this.users.delete(socketId);
-    // 如果房主离开，转移房主权限
-    if (this.hostId === socketId && this.users.size > 0) {
-      this.hostId = this.users.keys().next().value;
+
+    // 只有当房间彻底没人时，才重置房主
+    // 这样房主刷新页面 (socketId 变了但 userId 没变) 回来后还是房主
+    if (this.users.size === 0) {
+      this.hostUserId = null;
     }
+  }
+
+  /**
+   * 检查是否是房主
+   */
+  isHost(socketId) {
+    const user = this.users.get(socketId);
+    return user && user.userId === this.hostUserId;
   }
 
   getUserList() {
@@ -142,8 +168,9 @@ class Room {
     this.users.forEach((user, socketId) => {
       list.push({
         id: socketId,
+        userId: user.userId, // 返回 userId 供前端判断
         name: user.name,
-        isHost: socketId === this.hostId
+        isHost: user.userId === this.hostUserId
       });
     });
     return list;
@@ -178,9 +205,10 @@ class Room {
     this.settings = { ...this.settings, ...newSettings };
   }
 
-  transferHost(newHostId) {
-    if (this.users.has(newHostId)) {
-      this.hostId = newHostId;
+  transferHost(newHostSocketId) {
+    const user = this.users.get(newHostSocketId);
+    if (user) {
+      this.hostUserId = user.userId;
       return true;
     }
     return false;
@@ -533,9 +561,9 @@ app.post('/api/bilibili/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// 下载并合并 B 站视频 (DASH 音视频合并)
+// 下载 B 站视频 (分离音视频，用于 MSE 播放)
 app.post('/api/bilibili/download', async (req, res) => {
-  const { bvid, cid, qn, roomId, socketId } = req.body;
+  const { bvid, cid, qn, roomId } = req.body;
 
   if (!bvid || !cid) {
     return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' });
@@ -546,7 +574,7 @@ app.post('/api/bilibili/download', async (req, res) => {
 
     console.log(`[B站下载] 开始处理: ${bvid}, cid: ${cid}, qn: ${qn || 80}`);
 
-    const outputPath = await bilibili.downloadAndMerge(
+    const result = await bilibili.downloadSeparate(
       bvid,
       parseInt(cid),
       parseInt(qn) || 80,
@@ -556,7 +584,6 @@ app.post('/api/bilibili/download', async (req, res) => {
         console.log(`[B站下载] ${progress.message} (${progress.progress}%)`);
         // 通过 Socket.IO 推送进度到房间
         if (roomId) {
-          console.log(`[B站下载] 发送进度到房间 ${roomId}`);
           io.in(roomId).emit('bilibili-download-progress', {
             stage: progress.stage,
             progress: progress.progress,
@@ -566,25 +593,23 @@ app.post('/api/bilibili/download', async (req, res) => {
       }
     );
 
-    // 返回相对 URL 路径
-    const filename = path.basename(outputPath);
-    const videoUrl = `/uploads/${filename}`;
-
     // 记录到房间的 B 站文件列表（用于清理）
     if (roomId) {
       const room = rooms.get(roomId);
       if (room) {
-        room.bilibiliFiles.push(filename);
+        room.bilibiliFiles.push(result.videoFilename, result.audioFilename);
       }
     }
 
-    console.log(`[B站下载] 完成: ${videoUrl}`);
+    console.log(`[B站下载] 完成: video=${result.videoPath}, audio=${result.audioPath}`);
 
     res.json({
       success: true,
       data: {
-        url: videoUrl,
-        filename
+        type: 'mse',  // 标记为 MSE 类型
+        videoUrl: result.videoPath,
+        audioUrl: result.audioPath,
+        codecs: result.codecs
       }
     });
 
@@ -592,7 +617,7 @@ app.post('/api/bilibili/download', async (req, res) => {
     console.error('[B站下载] 失败:', err.message);
     // 通知房间下载失败
     if (roomId) {
-      io.to(roomId).emit('bilibili-download-progress', {
+      io.in(roomId).emit('bilibili-download-progress', {
         stage: 'error',
         progress: 0,
         message: err.message
@@ -918,7 +943,7 @@ function checkPermission(room, socketId, action) {
   if (!room) return false;
 
   // 房主始终有权限
-  if (room.hostId === socketId) return true;
+  if (room.isHost(socketId)) return true;
 
   // 根据不同操作检查权限
   switch (action) {
@@ -959,7 +984,7 @@ io.on('connection', (socket) => {
   });
 
   // 加入房间
-  socket.on('join-room', ({ roomId, userName }, callback) => {
+  socket.on('join-room', ({ roomId, userName, userId }, callback) => {
     const room = rooms.get(roomId);
 
     if (!room) {
@@ -967,7 +992,10 @@ io.on('connection', (socket) => {
       return;
     }
 
-    room.addUser(socket.id, userName);
+    // 如果没有 userId，使用 socket.id 作为临时 ID (降级兼容)
+    const effectiveUserId = userId || socket.id;
+
+    room.addUser(socket.id, userName, effectiveUserId);
     socket.join(roomId);
     currentRoom = roomId;
     currentUserName = userName;
@@ -984,7 +1012,7 @@ io.on('connection', (socket) => {
     callback({
       success: true,
       roomId,
-      isHost: room.hostId === socket.id,
+      isHost: room.isHost(socket.id),
       videoUrl: room.videoUrl,
       subtitleUrl: room.subtitleUrl,
       videoState: room.videoState,
@@ -995,7 +1023,7 @@ io.on('connection', (socket) => {
   });
 
   // 更换视频源
-  socket.on('change-video', ({ url }) => {
+  socket.on('change-video', ({ url, mseData }) => {
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
     if (!room) return;
@@ -1007,6 +1035,7 @@ io.on('connection', (socket) => {
     }
 
     room.videoUrl = url;
+    room.mseData = mseData || null;  // 保存 MSE 数据
     room.videoState = {
       isPlaying: false,
       currentTime: 0,
@@ -1016,10 +1045,11 @@ io.on('connection', (socket) => {
     // 广播给房间内所有人（包括自己）
     io.to(currentRoom).emit('video-changed', {
       url,
+      mseData,
       changedBy: currentUserName
     });
 
-    console.log(`房间 ${currentRoom} 视频更换为: ${url}`);
+    console.log(`房间 ${currentRoom} 视频更换为: ${url}${mseData ? ' (MSE)' : ''}`);
   });
 
   // 更换字幕
@@ -1145,7 +1175,7 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     // 只有房主可以修改设置
-    if (room.hostId !== socket.id) {
+    if (!room.isHost(socket.id)) {
       if (callback) callback({ success: false, error: '只有房主可以修改房间设置' });
       return;
     }
@@ -1202,7 +1232,7 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     // 只有当前房主可以转让
-    if (room.hostId !== socket.id) {
+    if (!room.isHost(socket.id)) {
       if (callback) callback({ success: false, error: '只有房主可以转让权限' });
       return;
     }

@@ -2618,18 +2618,20 @@ input::placeholder {
 /* 下载进度条 */
 .bilibili-progress-container {
   width: 100%;
-  margin-top: 0;
-  padding: 1rem 1.5rem;
-  background: linear-gradient(135deg, rgba(0, 181, 229, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%);
-  border: 1px solid rgba(0, 181, 229, 0.2);
-  border-radius: var(--radius-lg);
+  margin-top: 1rem;
+  padding: 0;
+  background: transparent !important;
+  border: none !important;
+  box-sizing: border-box;
 }
 
 .bilibili-progress-container .progress-info {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
+  padding: 0 0.2rem;
+  /* 微调文字对齐 */
 }
 
 .bilibili-progress-container .progress-info #bilibili-progress-text {
@@ -2639,9 +2641,9 @@ input::placeholder {
 }
 
 .bilibili-progress-container .progress-info #bilibili-progress-percent {
-  color: var(--primary-light);
+  color: var(--primary);
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 .bilibili-progress-container .progress-bar-bg {
@@ -2650,14 +2652,19 @@ input::placeholder {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 3px;
   overflow: hidden;
+  /* 关键：确保内部不溢出 */
+  position: relative;
+  /* 确保定位上下文 */
 }
 
 .bilibili-progress-container .progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #00b5e5 0%, #7c3aed 50%, #f472b6 100%);
+  width: 0%;
+  /* 初始宽度 */
+  background: linear-gradient(90deg, #00b5e5 0%, #23c9ff 100%);
   border-radius: 3px;
-  transition: width 0.15s ease-out;
-  box-shadow: 0 0 10px rgba(0, 181, 229, 0.5);
+  transition: width 0.2s ease-out;
+  box-shadow: 0 0 8px rgba(0, 181, 229, 0.3);
 }
 
 /* 响应式 */
@@ -2680,4 +2687,31 @@ input::placeholder {
     height: auto;
     aspect-ratio: 16/9;
   }
+}
+
+/* 禁用播放器控制 - 当没有权限时 */
+.video-js.controls-disabled .vjs-control-bar {
+  pointer-events: none;
+}
+
+/* 允许全屏、画中画、音量等操作，但禁用进度条和播放/暂停 */
+.video-js.controls-disabled .vjs-control-bar .vjs-progress-control,
+.video-js.controls-disabled .vjs-control-bar .vjs-play-control,
+.video-js.controls-disabled .vjs-big-play-button {
+  pointer-events: none !important;
+  opacity: 0.5;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
+
+/* 允许其他按钮（如音量、全屏、设置）仍可点击 */
+.video-js.controls-disabled .vjs-control-bar .vjs-volume-panel,
+.video-js.controls-disabled .vjs-control-bar .vjs-fullscreen-control,
+.video-js.controls-disabled .vjs-control-bar .vjs-picture-in-picture-control,
+.video-js.controls-disabled .vjs-control-bar .vjs-subs-caps-button,
+.video-js.controls-disabled .vjs-control-bar .vjs-quality-selector,
+.video-js.controls-disabled .vjs-control-bar .audio-track-selector,
+.video-js.controls-disabled .vjs-control-bar .vjs-playback-rate {
+  pointer-events: auto;
+  opacity: 1;
 }

@@ -583,6 +583,91 @@ function proxyVideoStream(videoUrl, req, res, cookie = '') {
     proxyReq.end();
 }
 
+/**
+ * 只下载不合并 (用于 MSE 播放)
+ * @param {string} bvid BV 号
+ * @param {number} cid 分P cid
+ * @param {number} qn 清晰度
+ * @param {string} cookie Cookie
+ * @param {string} uploadsDir 上传目录
+ * @param {function} onProgress 进度回调
+ * @returns {Promise<{videoPath: string, audioPath: string, codecs: object}>}
+ */
+async function downloadSeparate(bvid, cid, qn, cookie, uploadsDir, onProgress = () => { }) {
+    const taskId = `${bvid}_${cid}_${qn}_${Date.now()}`;
+    const videoFilename = `bilibili_${taskId}_video.m4s`;
+    const audioFilename = `bilibili_${taskId}_audio.m4s`;
+    const videoPath = path.join(uploadsDir, videoFilename);
+    const audioPath = path.join(uploadsDir, audioFilename);
+
+    try {
+        onProgress({ stage: 'fetching', progress: 5, message: '获取播放地址...' });
+
+        // 获取播放地址
+        const playUrl = await getPlayUrl(bvid, cid, qn, cookie);
+
+        if (!playUrl.dash?.video || !playUrl.dash?.audio) {
+            throw new Error('无法获取 DASH 格式视频');
+        }
+
+        const videoUrl = playUrl.dash.video.url;
+        const audioUrl = playUrl.dash.audio.url;
+
+        // 保存编码信息
+        const codecs = {
+            video: playUrl.dash.video.codecs || 'avc1.64001F',
+            audio: playUrl.dash.audio.codecs || 'mp4a.40.2'
+        };
+
+        onProgress({ stage: 'downloading_video', progress: 10, message: '下载视频流...' });
+
+        // 格式化文件大小
+        const formatSize = (bytes) => {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        };
+
+        // 下载视频流
+        await downloadFile(videoUrl, videoPath, cookie, 3, (p) => {
+            const progress = 10 + Math.round(p.percent * 0.4); // 10% - 50%
+            onProgress({
+                stage: 'downloading_video',
+                progress,
+                message: `下载视频流 ${formatSize(p.downloaded)} / ${formatSize(p.total)}`
+            });
+        });
+
+        onProgress({ stage: 'downloading_audio', progress: 55, message: '下载音频流...' });
+
+        // 下载音频流
+        await downloadFile(audioUrl, audioPath, cookie, 3, (p) => {
+            const progress = 55 + Math.round(p.percent * 0.4); // 55% - 95%
+            onProgress({
+                stage: 'downloading_audio',
+                progress,
+                message: `下载音频流 ${formatSize(p.downloaded)} / ${formatSize(p.total)}`
+            });
+        });
+
+        onProgress({ stage: 'complete', progress: 100, message: '下载完成' });
+
+        return {
+            videoPath: `/uploads/${videoFilename}`,
+            audioPath: `/uploads/${audioFilename}`,
+            videoFilename,
+            audioFilename,
+            codecs
+        };
+
+    } catch (err) {
+        // 清理临时文件
+        fs.unlink(videoPath, () => { });
+        fs.unlink(audioPath, () => { });
+        throw err;
+    }
+}
+
 module.exports = {
     QUALITY_MAP,
     generateQRCode,
@@ -595,6 +680,7 @@ module.exports = {
     getVideoInfo,
     getPlayUrl,
     downloadAndMerge,
+    downloadSeparate,
     proxyVideoStream
 };
 
