@@ -85,6 +85,19 @@
             </button>
             <input type="file" id="subtitle-file-input" accept=".srt,.ass,.ssa,.sub,.idx" style="display: none;">
           </div>
+
+          <!-- B 站视频解析 -->
+          <div class="bilibili-input-wrapper">
+            <i class="fa-brands fa-bilibili bilibili-icon"></i>
+            <input type="text" id="bilibili-url-input" placeholder="粘贴 B 站链接或 BV 号 (如 BV1xx411c7mD)" autocomplete="off">
+            <button id="parse-bilibili-btn" class="load-btn bilibili-btn">
+              <span>解析B站</span>
+            </button>
+            <button id="bilibili-login-btn" class="upload-btn bilibili-login-btn" type="button" title="登录 B 站账号获取高清视频">
+              <i class="fa-solid fa-user"></i>
+              <span id="bilibili-login-text">登录B站</span>
+            </button>
+          </div>
           <!-- 上传进度条 -->
           <div class="upload-progress" id="upload-progress" style="display: none;">
             <div class="progress-bar">
@@ -357,6 +370,79 @@
       <div class="modal-footer">
         <button id="cancel-nickname-btn" class="btn btn-secondary">取消</button>
         <button id="save-nickname-btn" class="btn btn-primary">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- B 站扫码登录弹窗 -->
+  <div id="bilibili-qrcode-modal" class="modal-overlay">
+    <div class="modal-content bilibili-modal">
+      <div class="modal-header">
+        <h3><i class="fa-brands fa-bilibili"></i> 登录 B 站</h3>
+        <button class="modal-close-btn" id="bilibili-qrcode-close" title="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body bilibili-qrcode-body">
+        <div class="qrcode-container" id="qrcode-container">
+          <div class="qrcode-loading">
+            <div class="loading-spinner"></div>
+            <p>正在生成二维码...</p>
+          </div>
+        </div>
+        <p class="qrcode-hint">使用 B 站 App 扫码登录</p>
+        <p class="qrcode-status" id="qrcode-status"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- B 站视频信息弹窗 -->
+  <div id="bilibili-video-modal" class="modal-overlay">
+    <div class="modal-content bilibili-video-modal">
+      <div class="modal-header">
+        <h3><i class="fa-brands fa-bilibili"></i> B 站视频</h3>
+        <button class="modal-close-btn" id="bilibili-video-close" title="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="bilibili-video-info" id="bilibili-video-info">
+          <img class="video-cover" id="bilibili-cover" src="" alt="封面">
+          <div class="video-details">
+            <h4 class="video-title" id="bilibili-title"></h4>
+            <p class="video-author" id="bilibili-author"></p>
+            <div class="video-stats" id="bilibili-stats"></div>
+          </div>
+        </div>
+        <div class="bilibili-options">
+          <div class="option-group">
+            <label>选择分P：</label>
+            <select id="bilibili-page-select" class="bilibili-select">
+              <!-- 动态填充 -->
+            </select>
+          </div>
+          <div class="option-group">
+            <label>选择清晰度：</label>
+            <select id="bilibili-quality-select" class="bilibili-select">
+              <!-- 动态填充 -->
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="bilibili-play-btn" class="btn btn-primary bilibili-play-btn">
+          <i class="fa-solid fa-play"></i> 播放视频
+        </button>
+        <!-- 下载进度条 -->
+        <div id="bilibili-progress-container" class="bilibili-progress-container" style="display: none;">
+          <div class="progress-info">
+            <span id="bilibili-progress-text">准备下载...</span>
+            <span id="bilibili-progress-percent">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="bilibili-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

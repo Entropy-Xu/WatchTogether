@@ -73,6 +73,9 @@ const mimeTypes = {
   '.m3u8': 'application/x-mpegURL'
 };
 
+// JSON 请求体解析中间件
+app.use(express.json());
+
 // 静态文件服务
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -112,6 +115,8 @@ class Room {
       allowAllChangeSubtitle: false,  // 是否允许所有人更换字幕
       allowAllControl: true            // 是否允许所有人控制播放
     };
+    // 跟踪 B 站下载的文件（用于清理）
+    this.bilibiliFiles = [];
   }
 
   addUser(socketId, name) {
@@ -183,9 +188,9 @@ class Room {
 }
 
 // ============ 并行分片转码配置 ============
-const ffmpegDir = '/usr/local/bin';
-const ffprobePath = `${ffmpegDir}/ffprobe`;
-const ffmpegPath = `${ffmpegDir}/ffmpeg`;
+// 使用系统 PATH 中的 ffmpeg/ffprobe
+const ffprobePath = 'ffprobe';
+const ffmpegPath = 'ffmpeg';
 
 // 每个分片的时长 (秒) - 5分钟
 const SEGMENT_DURATION = 300;
@@ -390,6 +395,213 @@ app.get('/api/room/:roomId', (req, res) => {
     res.json({ exists: false });
   }
 });
+
+// ============ B 站相关 API ============
+const bilibili = require('./bilibili');
+
+// 生成登录二维码
+app.get('/api/bilibili/qrcode', async (req, res) => {
+  try {
+    const QRCode = require('qrcode');
+    const result = await bilibili.generateQRCode();
+
+    // 在服务端生成二维码图片的 base64
+    const qrcodeDataUrl = await QRCode.toDataURL(result.url, {
+      width: 200,
+      margin: 1,
+      color: { dark: '#000000', light: '#ffffff' }
+    });
+
+    res.json({
+      success: true,
+      qrcode_key: result.qrcode_key,
+      qrcode_image: qrcodeDataUrl  // base64 图片
+    });
+  } catch (err) {
+    console.error('生成二维码失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 轮询二维码状态
+app.get('/api/bilibili/qrcode/poll', async (req, res) => {
+  const { qrcode_key, roomId } = req.query;
+
+  if (!qrcode_key) {
+    return res.status(400).json({ success: false, error: '缺少 qrcode_key' });
+  }
+
+  try {
+    const result = await bilibili.pollQRCodeStatus(qrcode_key);
+
+    // 登录成功，保存 Cookie 到房间
+    if (result.code === 0 && result.cookie && roomId) {
+      bilibili.saveCookie(roomId, result.cookie);
+      console.log(`房间 ${roomId} B站登录成功`);
+    }
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('轮询二维码状态失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 检查登录状态
+app.get('/api/bilibili/login-status', async (req, res) => {
+  const { roomId } = req.query;
+
+  if (!roomId) {
+    return res.json({ success: true, isLogin: false });
+  }
+
+  const cookie = bilibili.getCookie(roomId);
+  if (!cookie) {
+    return res.json({ success: true, isLogin: false });
+  }
+
+  try {
+    const status = await bilibili.checkLoginStatus(cookie);
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.json({ success: true, isLogin: false });
+  }
+});
+
+// 获取视频信息
+app.get('/api/bilibili/video/:bvid', async (req, res) => {
+  const { bvid } = req.params;
+  const { roomId } = req.query;
+
+  if (!bvid) {
+    return res.status(400).json({ success: false, error: '缺少 BV 号' });
+  }
+
+  try {
+    const cookie = roomId ? bilibili.getCookie(roomId) : '';
+    const info = await bilibili.getVideoInfo(bvid, cookie);
+    res.json({ success: true, data: info });
+  } catch (err) {
+    console.error('获取视频信息失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 获取播放地址
+app.get('/api/bilibili/playurl', async (req, res) => {
+  const { bvid, cid, qn = 80, roomId } = req.query;
+
+  if (!bvid || !cid) {
+    return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' });
+  }
+
+  try {
+    const cookie = roomId ? bilibili.getCookie(roomId) : '';
+    const playurl = await bilibili.getPlayUrl(bvid, parseInt(cid), parseInt(qn), cookie);
+    res.json({ success: true, data: playurl });
+  } catch (err) {
+    console.error('获取播放地址失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 代理视频流
+app.get('/api/bilibili/proxy', (req, res) => {
+  const { url, roomId } = req.query;
+
+  if (!url) {
+    return res.status(400).json({ success: false, error: '缺少视频 URL' });
+  }
+
+  try {
+    const cookie = roomId ? bilibili.getCookie(roomId) : '';
+    bilibili.proxyVideoStream(url, req, res, cookie);
+  } catch (err) {
+    console.error('代理视频流失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 退出 B 站登录
+app.post('/api/bilibili/logout', (req, res) => {
+  const { roomId } = req.body;
+
+  if (roomId) {
+    bilibili.deleteCookie(roomId);
+  }
+
+  res.json({ success: true });
+});
+
+// 下载并合并 B 站视频 (DASH 音视频合并)
+app.post('/api/bilibili/download', async (req, res) => {
+  const { bvid, cid, qn, roomId, socketId } = req.body;
+
+  if (!bvid || !cid) {
+    return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' });
+  }
+
+  try {
+    const cookie = roomId ? bilibili.getCookie(roomId) : '';
+
+    console.log(`[B站下载] 开始处理: ${bvid}, cid: ${cid}, qn: ${qn || 80}`);
+
+    const outputPath = await bilibili.downloadAndMerge(
+      bvid,
+      parseInt(cid),
+      parseInt(qn) || 80,
+      cookie,
+      uploadsDir,
+      (progress) => {
+        console.log(`[B站下载] ${progress.message} (${progress.progress}%)`);
+        // 通过 Socket.IO 推送进度到房间
+        if (roomId) {
+          console.log(`[B站下载] 发送进度到房间 ${roomId}`);
+          io.in(roomId).emit('bilibili-download-progress', {
+            stage: progress.stage,
+            progress: progress.progress,
+            message: progress.message
+          });
+        }
+      }
+    );
+
+    // 返回相对 URL 路径
+    const filename = path.basename(outputPath);
+    const videoUrl = `/uploads/${filename}`;
+
+    // 记录到房间的 B 站文件列表（用于清理）
+    if (roomId) {
+      const room = rooms.get(roomId);
+      if (room) {
+        room.bilibiliFiles.push(filename);
+      }
+    }
+
+    console.log(`[B站下载] 完成: ${videoUrl}`);
+
+    res.json({
+      success: true,
+      data: {
+        url: videoUrl,
+        filename
+      }
+    });
+
+  } catch (err) {
+    console.error('[B站下载] 失败:', err.message);
+    // 通知房间下载失败
+    if (roomId) {
+      io.to(roomId).emit('bilibili-download-progress', {
+        stage: 'error',
+        progress: 0,
+        message: err.message
+      });
+    }
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 // 视频上传 API
 app.post('/api/upload', upload.single('video'), (req, res) => {
@@ -1065,6 +1277,24 @@ io.on('connection', (socket) => {
               } catch (e) {
                 console.error('清理文件失败:', e);
               }
+
+              // 清理 B 站下载的文件
+              if (r.bilibiliFiles && r.bilibiliFiles.length > 0) {
+                for (const filename of r.bilibiliFiles) {
+                  try {
+                    const filePath = path.join(uploadsDir, filename);
+                    if (fs.existsSync(filePath)) {
+                      fs.unlinkSync(filePath);
+                      console.log(`清理B站视频: ${filename}`);
+                    }
+                  } catch (e) {
+                    console.error('清理B站文件失败:', e);
+                  }
+                }
+              }
+
+              // 清理 B 站 Cookie
+              bilibili.deleteCookie(currentRoom);
 
               rooms.delete(currentRoom);
               console.log(`房间 ${currentRoom} 已删除（无人）`);

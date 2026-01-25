@@ -329,6 +329,37 @@ function initSocket() {
         console.log(`[转码进度] ${data.stage}: ${data.progress}% - ${data.message}`);
     });
 
+    // B 站下载进度
+    socket.on('bilibili-download-progress', (data) => {
+        console.log('[B站下载] 收到进度事件:', data);
+
+        const progressContainer = document.getElementById('bilibili-progress-container');
+        const progressBar = document.getElementById('bilibili-progress-bar');
+        const progressText = document.getElementById('bilibili-progress-text');
+        const progressPercent = document.getElementById('bilibili-progress-percent');
+
+        if (!progressContainer) {
+            console.warn('[B站下载] 进度条容器不存在');
+            return;
+        }
+
+        // 更新进度条
+        if (progressBar) {
+            progressBar.style.width = `${data.progress}%`;
+        }
+
+        // 更新文本
+        if (progressText) {
+            progressText.textContent = data.message || '';
+        }
+
+        if (progressPercent) {
+            progressPercent.textContent = `${data.progress}%`;
+        }
+
+        console.log(`[B站下载] 进度已更新: ${data.progress}%`);
+    });
+
     // 房间设置更新
     socket.on('settings-updated', ({ settings, updatedBy }) => {
         roomSettings = settings;
@@ -1637,3 +1668,390 @@ function initSubtitleSelector() {
     player.textTracks().addEventListener('addtrack', updateSubtitleMenu);
     player.textTracks().addEventListener('removetrack', updateSubtitleMenu);
 }
+
+// ==========================================
+// B 站视频解析功能
+// ==========================================
+
+let bilibiliVideoInfo = null;    // 当前解析的视频信息
+let bilibiliPlayUrl = null;      // 当前播放地址信息
+let qrcodePollingTimer = null;   // 二维码轮询定时器
+
+/**
+ * 初始化 B 站功能
+ */
+function initBilibiliFeatures() {
+    const parseBilibiliBtn = document.getElementById('parse-bilibili-btn');
+    const bilibiliLoginBtn = document.getElementById('bilibili-login-btn');
+    const bilibiliUrlInput = document.getElementById('bilibili-url-input');
+
+    // 解析 B 站视频
+    parseBilibiliBtn?.addEventListener('click', parseBilibiliVideo);
+    bilibiliUrlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') parseBilibiliVideo();
+    });
+
+    // 登录 B 站
+    bilibiliLoginBtn?.addEventListener('click', openBilibiliLoginModal);
+
+    // 扫码弹窗关闭
+    document.getElementById('bilibili-qrcode-close')?.addEventListener('click', closeBilibiliLoginModal);
+
+    // 视频弹窗关闭
+    document.getElementById('bilibili-video-close')?.addEventListener('click', closeBilibiliVideoModal);
+
+    // 播放按钮
+    document.getElementById('bilibili-play-btn')?.addEventListener('click', playBilibiliVideo);
+
+    // 分P 选择变化时重新获取清晰度
+    document.getElementById('bilibili-page-select')?.addEventListener('change', onPageSelectChange);
+
+    // 检查登录状态
+    checkBilibiliLoginStatus();
+}
+
+/**
+ * 从输入中提取 BV 号
+ */
+function extractBVID(input) {
+    if (!input) return null;
+    const match = input.match(/BV[a-zA-Z0-9]{10}/i);
+    return match ? match[0] : null;
+}
+
+/**
+ * 解析 B 站视频
+ */
+async function parseBilibiliVideo() {
+    const input = document.getElementById('bilibili-url-input').value.trim();
+    const bvid = extractBVID(input);
+
+    if (!bvid) {
+        showToast('请输入有效的 B 站视频链接或 BV 号', 'error');
+        return;
+    }
+
+    const parseBtn = document.getElementById('parse-bilibili-btn');
+    parseBtn.disabled = true;
+    parseBtn.querySelector('span').textContent = '解析中...';
+
+    try {
+        const response = await fetch(`/api/bilibili/video/${bvid}?roomId=${roomId}`);
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || '解析失败');
+        }
+
+        bilibiliVideoInfo = result.data;
+        showBilibiliVideoModal();
+
+    } catch (err) {
+        showToast(`解析失败: ${err.message}`, 'error');
+    } finally {
+        parseBtn.disabled = false;
+        parseBtn.querySelector('span').textContent = '解析B站';
+    }
+}
+
+/**
+ * 显示视频信息弹窗
+ */
+function showBilibiliVideoModal() {
+    if (!bilibiliVideoInfo) return;
+
+    const modal = document.getElementById('bilibili-video-modal');
+    const info = bilibiliVideoInfo;
+
+    // 填充视频信息 (添加 referrerPolicy 解决防盗链)
+    const coverImg = document.getElementById('bilibili-cover');
+    coverImg.referrerPolicy = 'no-referrer';
+    coverImg.src = info.pic.replace('http:', 'https:');
+    document.getElementById('bilibili-title').textContent = info.title;
+    document.getElementById('bilibili-author').textContent = `UP主: ${info.owner.name}`;
+    document.getElementById('bilibili-stats').innerHTML = `
+        <span><i class="fa-solid fa-play"></i> ${formatNumber(info.stat.view)}</span>
+        <span><i class="fa-solid fa-comment"></i> ${formatNumber(info.stat.danmaku)}</span>
+        <span><i class="fa-solid fa-thumbs-up"></i> ${formatNumber(info.stat.like)}</span>
+    `;
+
+    // 填充分P列表
+    const pageSelect = document.getElementById('bilibili-page-select');
+    pageSelect.innerHTML = '';
+    info.pages.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.cid;
+        option.textContent = info.pages.length > 1 ? `P${p.page}: ${p.part}` : info.title;
+        pageSelect.appendChild(option);
+    });
+
+    // 获取清晰度列表
+    fetchQualityList(info.bvid, info.cid);
+
+    modal.classList.add('show');
+}
+
+/**
+ * 格式化数字
+ */
+function formatNumber(num) {
+    if (num >= 10000) {
+        return (num / 10000).toFixed(1) + '万';
+    }
+    return num.toString();
+}
+
+/**
+ * 关闭视频信息弹窗
+ */
+function closeBilibiliVideoModal() {
+    document.getElementById('bilibili-video-modal').classList.remove('show');
+}
+
+/**
+ * 分P选择变化时重新获取清晰度
+ */
+function onPageSelectChange() {
+    const cid = document.getElementById('bilibili-page-select').value;
+    if (bilibiliVideoInfo && cid) {
+        fetchQualityList(bilibiliVideoInfo.bvid, cid);
+    }
+}
+
+/**
+ * 获取清晰度列表
+ */
+async function fetchQualityList(bvid, cid) {
+    const qualitySelect = document.getElementById('bilibili-quality-select');
+    qualitySelect.innerHTML = '<option value="">加载中...</option>';
+
+    try {
+        const response = await fetch(`/api/bilibili/playurl?bvid=${bvid}&cid=${cid}&roomId=${roomId}`);
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+
+        bilibiliPlayUrl = result.data;
+
+        // 填充清晰度选项
+        qualitySelect.innerHTML = '';
+        result.data.qualities.forEach(q => {
+            const option = document.createElement('option');
+            option.value = q.qn;
+            option.textContent = q.description;
+            qualitySelect.appendChild(option);
+        });
+
+        // 默认选中当前清晰度
+        qualitySelect.value = result.data.quality;
+
+    } catch (err) {
+        qualitySelect.innerHTML = '<option value="">获取失败</option>';
+        console.error('获取清晰度失败:', err);
+    }
+}
+
+/**
+ * 播放 B 站视频
+ */
+async function playBilibiliVideo() {
+    if (!bilibiliVideoInfo) {
+        showToast('请先解析视频', 'error');
+        return;
+    }
+
+    const playBtn = document.getElementById('bilibili-play-btn');
+    const progressContainer = document.getElementById('bilibili-progress-container');
+    const progressBar = document.getElementById('bilibili-progress-bar');
+    const progressText = document.getElementById('bilibili-progress-text');
+    const progressPercent = document.getElementById('bilibili-progress-percent');
+    const qn = document.getElementById('bilibili-quality-select').value;
+    const cid = document.getElementById('bilibili-page-select').value;
+
+    playBtn.disabled = true;
+    playBtn.style.display = 'none';
+
+    // 显示进度条
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressText.textContent = '准备下载...';
+    progressPercent.textContent = '0%';
+
+    try {
+        // 调用后端下载并合并 API
+        const response = await fetch('/api/bilibili/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bvid: bilibiliVideoInfo.bvid,
+                cid: cid,
+                qn: qn || 80,
+                roomId: roomId
+            })
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || '下载失败');
+        }
+
+        const videoUrl = result.data.url;
+
+        // 隐藏进度条
+        progressContainer.style.display = 'none';
+
+        // 关闭弹窗
+        closeBilibiliVideoModal();
+
+        // 通知房间更换视频
+        socket.emit('change-video', { url: videoUrl });
+
+        showToast(`正在加载: ${bilibiliVideoInfo.title}`, 'success');
+
+    } catch (err) {
+        showToast(`播放失败: ${err.message}`, 'error');
+        // 出错时隐藏进度条
+        progressContainer.style.display = 'none';
+    } finally {
+        playBtn.disabled = false;
+        playBtn.style.display = 'flex';
+    }
+}
+
+/**
+ * 打开 B 站登录弹窗
+ */
+async function openBilibiliLoginModal() {
+    const modal = document.getElementById('bilibili-qrcode-modal');
+    const container = document.getElementById('qrcode-container');
+    const status = document.getElementById('qrcode-status');
+
+    modal.classList.add('show');
+    container.innerHTML = '<div class="qrcode-loading"><div class="loading-spinner"></div><p>正在生成二维码...</p></div>';
+    status.textContent = '';
+    status.className = 'qrcode-status';
+
+    try {
+        const response = await fetch('/api/bilibili/qrcode');
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+
+        // 使用后端生成的 base64 二维码图片
+        container.innerHTML = `<img src="${result.qrcode_image}" alt="登录二维码">`;
+
+        // 开始轮询
+        startQRCodePolling(result.qrcode_key);
+
+    } catch (err) {
+        container.innerHTML = `<div class="qrcode-loading"><p style="color: #ef4444;">生成二维码失败</p></div>`;
+        status.textContent = err.message;
+        status.className = 'qrcode-status error';
+    }
+}
+
+/**
+ * 关闭登录弹窗
+ */
+function closeBilibiliLoginModal() {
+    const modal = document.getElementById('bilibili-qrcode-modal');
+    modal.classList.remove('show');
+
+    // 停止轮询
+    if (qrcodePollingTimer) {
+        clearInterval(qrcodePollingTimer);
+        qrcodePollingTimer = null;
+    }
+}
+
+/**
+ * 开始轮询二维码状态
+ */
+function startQRCodePolling(qrcodeKey) {
+    const status = document.getElementById('qrcode-status');
+    let pollCount = 0;
+    const maxPolls = 90; // 最多轮询 90 次 (约 180 秒)
+
+    qrcodePollingTimer = setInterval(async () => {
+        pollCount++;
+
+        if (pollCount > maxPolls) {
+            clearInterval(qrcodePollingTimer);
+            status.textContent = '二维码已过期，请重新生成';
+            status.className = 'qrcode-status error';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/bilibili/qrcode/poll?qrcode_key=${qrcodeKey}&roomId=${roomId}`);
+            const result = await response.json();
+
+            switch (result.code) {
+                case 0: // 登录成功
+                    clearInterval(qrcodePollingTimer);
+                    status.textContent = '登录成功！';
+                    status.className = 'qrcode-status success';
+                    setTimeout(() => {
+                        closeBilibiliLoginModal();
+                        checkBilibiliLoginStatus();
+                        showToast('B 站登录成功', 'success');
+                    }, 1000);
+                    break;
+
+                case 86090: // 已扫码未确认
+                    status.textContent = '已扫码，请在手机上确认';
+                    break;
+
+                case 86038: // 已过期
+                    clearInterval(qrcodePollingTimer);
+                    status.textContent = '二维码已过期，请重新生成';
+                    status.className = 'qrcode-status error';
+                    break;
+
+                case 86101: // 未扫码
+                default:
+                    status.textContent = '等待扫码...';
+                    break;
+            }
+        } catch (err) {
+            console.error('轮询失败:', err);
+        }
+    }, 2000);
+}
+
+/**
+ * 检查 B 站登录状态
+ */
+async function checkBilibiliLoginStatus() {
+    try {
+        const response = await fetch(`/api/bilibili/login-status?roomId=${roomId}`);
+        const result = await response.json();
+
+        const loginBtn = document.getElementById('bilibili-login-btn');
+        const loginText = document.getElementById('bilibili-login-text');
+
+        if (result.isLogin) {
+            loginBtn.classList.add('logged-in');
+            loginText.textContent = result.username || '已登录';
+            loginBtn.title = `已登录: ${result.username}`;
+        } else {
+            loginBtn.classList.remove('logged-in');
+            loginText.textContent = '登录B站';
+            loginBtn.title = '登录 B 站账号获取高清视频';
+        }
+    } catch (err) {
+        console.error('检查登录状态失败:', err);
+    }
+}
+
+// 在 startRoom 中初始化 B 站功能
+const originalStartRoom = startRoom;
+startRoom = function () {
+    originalStartRoom();
+    initBilibiliFeatures();
+};

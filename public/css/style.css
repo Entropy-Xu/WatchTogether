@@ -2359,3 +2359,325 @@ input::placeholder {
     font-size: 0.8rem;
   }
 }
+
+/* ==========================================
+   B 站视频解析样式
+   ========================================== */
+
+/* B 站输入行 */
+.bilibili-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.bilibili-icon {
+  color: #00a1d6;
+  font-size: 1.3rem;
+}
+
+#bilibili-url-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.6rem 1rem;
+  background: rgba(0, 161, 214, 0.1);
+  border: 1px solid rgba(0, 161, 214, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+#bilibili-url-input:focus {
+  border-color: #00a1d6;
+  box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.2);
+  outline: none;
+}
+
+#bilibili-url-input::placeholder {
+  color: var(--text-muted);
+}
+
+.bilibili-btn {
+  background: linear-gradient(135deg, #00a1d6 0%, #00b5e5 100%);
+  border-color: rgba(0, 161, 214, 0.3);
+}
+
+.bilibili-btn:hover {
+  background: linear-gradient(135deg, #00b5e5 0%, #23c9ff 100%);
+  box-shadow: 0 0 15px rgba(0, 161, 214, 0.4);
+}
+
+.bilibili-login-btn {
+  background: rgba(0, 161, 214, 0.15);
+  border: 1px solid rgba(0, 161, 214, 0.3);
+  color: #00a1d6;
+}
+
+.bilibili-login-btn:hover {
+  background: rgba(0, 161, 214, 0.25);
+}
+
+.bilibili-login-btn.logged-in {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+
+/* B 站扫码弹窗 */
+.bilibili-modal {
+  max-width: 360px;
+  text-align: center;
+}
+
+.bilibili-modal .modal-header h3 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.bilibili-modal .modal-header h3 i {
+  color: #00a1d6;
+  font-size: 1.5rem;
+}
+
+.bilibili-qrcode-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.qrcode-container {
+  width: 200px;
+  height: 200px;
+  background: white;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.qrcode-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qrcode-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.qrcode-loading p {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.qrcode-hint {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.qrcode-status {
+  color: var(--primary-light);
+  font-size: 0.85rem;
+  margin: 0;
+  min-height: 1.2em;
+}
+
+.qrcode-status.success {
+  color: #10b981;
+}
+
+.qrcode-status.error {
+  color: #ef4444;
+}
+
+/* B 站视频信息弹窗 */
+.bilibili-video-modal {
+  max-width: 520px;
+}
+
+.bilibili-video-modal .modal-header h3 i {
+  color: #00a1d6;
+}
+
+.bilibili-video-info {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-glass);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.bilibili-video-info .video-cover {
+  width: 160px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.bilibili-video-info .video-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bilibili-video-info .video-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bilibili-video-info .video-author {
+  font-size: 0.85rem;
+  color: #00a1d6;
+  margin: 0;
+}
+
+.bilibili-video-info .video-stats {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* B 站选项区 */
+.bilibili-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.bilibili-options .option-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.bilibili-options label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.bilibili-select {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  outline: none;
+}
+
+.bilibili-select:focus {
+  border-color: #00a1d6;
+}
+
+.bilibili-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.bilibili-play-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #00a1d6 0%, #00b5e5 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.bilibili-play-btn:hover {
+  background: linear-gradient(135deg, #00b5e5 0%, #23c9ff 100%);
+}
+
+/* 下载进度条 */
+.bilibili-progress-container {
+  width: 100%;
+  margin-top: 0;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, rgba(0, 181, 229, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%);
+  border: 1px solid rgba(0, 181, 229, 0.2);
+  border-radius: var(--radius-lg);
+}
+
+.bilibili-progress-container .progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.bilibili-progress-container .progress-info #bilibili-progress-text {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.bilibili-progress-container .progress-info #bilibili-progress-percent {
+  color: var(--primary-light);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.bilibili-progress-container .progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bilibili-progress-container .progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00b5e5 0%, #7c3aed 50%, #f472b6 100%);
+  border-radius: 3px;
+  transition: width 0.15s ease-out;
+  box-shadow: 0 0 10px rgba(0, 181, 229, 0.5);
+}
+
+/* 响应式 */
+@media (max-width: 480px) {
+  .bilibili-input-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #bilibili-url-input {
+    min-width: auto;
+  }
+
+  .bilibili-video-info {
+    flex-direction: column;
+  }
+
+  .bilibili-video-info .video-cover {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16/9;
+  }
+}
