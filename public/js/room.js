@@ -125,25 +125,71 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!userName) {
         const modal = document.getElementById('join-modal');
         const nameInput = document.getElementById('join-name-input');
+        const passwordGroup = document.getElementById('join-password-group');
+        const passwordInput = document.getElementById('join-password-input');
         const joinBtn = document.getElementById('join-btn');
+        const errorEl = document.getElementById('join-error');
+        const descEl = document.getElementById('join-modal-desc');
 
-        modal.classList.add('show');
+        // 检查房间是否需要密码
+        fetch(`/api/room/${roomId}`)
+            .then(res => res.json())
+            .then(data => {
+                if (!data.exists) {
+                    alert('房间不存在');
+                    window.location.href = '/';
+                    return;
+                }
+
+                // 如果房间有密码，显示密码输入框
+                if (data.hasPassword) {
+                    passwordGroup.style.display = 'block';
+                    descEl.textContent = `加入「${data.name || '放映室'}」需要密码`;
+                }
+
+                modal.classList.add('show');
+            })
+            .catch(() => {
+                // 网络错误，仍然显示弹窗但不显示密码框
+                modal.classList.add('show');
+            });
 
         const joinAction = () => {
             const name = nameInput.value.trim();
-            if (name) {
-                userName = name;
-                sessionStorage.setItem('userName', name);
-                sessionStorage.setItem('roomId', roomId);
-                modal.classList.remove('show');
-                startRoom();
-            } else {
-                alert('请输入昵称');
+            const password = passwordInput ? passwordInput.value : '';
+
+            if (!name) {
+                errorEl.textContent = '请输入昵称';
+                return;
             }
+
+            // 如果需要密码但没输入
+            if (passwordGroup.style.display !== 'none' && !password) {
+                errorEl.textContent = '请输入房间密码';
+                return;
+            }
+
+            userName = name;
+            sessionStorage.setItem('userName', name);
+            sessionStorage.setItem('roomId', roomId);
+            if (password) {
+                sessionStorage.setItem('roomPassword', password);
+            }
+            modal.classList.remove('show');
+            startRoom();
         };
 
         joinBtn.addEventListener('click', joinAction);
         nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (passwordGroup.style.display !== 'none') {
+                    passwordInput.focus();
+                } else {
+                    joinAction();
+                }
+            }
+        });
+        passwordInput?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') joinAction();
         });
     } else {
@@ -530,8 +576,18 @@ function joinRoom() {
             showToast(`已加入放映室 ${roomId}`, 'success');
         } else {
             showConnectionOverlay(false);
-            alert(response.error || '加入房间失败');
-            window.location.href = '/';
+
+            // 如果需要密码，重定向回首页让用户输入密码
+            if (response.needPassword) {
+                alert(`加入房间失败: ${response.error}`);
+                // 保存信息以便首页自动弹出密码框
+                sessionStorage.setItem('pendingRoom', roomId);
+                sessionStorage.setItem('pendingUserName', userName);
+                window.location.href = '/';
+            } else {
+                alert(response.error || '加入房间失败');
+                window.location.href = '/';
+            }
         }
     });
 }

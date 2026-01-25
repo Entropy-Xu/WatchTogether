@@ -126,24 +126,30 @@
     </footer>
   </main>
 
-  <!-- 密码输入弹窗 -->
-  <div id="password-modal" class="modal">
-    <div class="modal-content password-modal-content">
+  <!-- 加入房间弹窗 -->
+  <div id="join-modal" class="modal">
+    <div class="modal-content join-modal-content">
       <div class="modal-header">
-        <h3><i class="fa-solid fa-lock"></i> 需要密码</h3>
-        <button class="close-btn" id="password-modal-close">&times;</button>
+        <h3><i class="fa-solid fa-door-open"></i> <span id="join-modal-title">加入放映室</span></h3>
+        <button class="close-btn" id="join-modal-close">&times;</button>
       </div>
       <div class="modal-body">
-        <p id="password-room-name">该房间需要密码才能加入</p>
+        <p id="join-modal-room-name" class="join-room-name"></p>
         <div class="input-group">
-          <input type="password" id="join-password" placeholder="输入房间密码..." maxlength="20" autocomplete="off">
+          <label for="join-modal-username">你的昵称</label>
+          <input type="text" id="join-modal-username" placeholder="输入昵称..." maxlength="20" required autocomplete="off">
         </div>
-        <p id="password-error" class="error-text"></p>
+        <div class="input-group" id="join-modal-password-group" style="display: none;">
+          <label for="join-modal-password">房间密码</label>
+          <input type="password" id="join-modal-password" placeholder="输入房间密码..." maxlength="20" autocomplete="off">
+        </div>
+        <p id="join-modal-error" class="error-text"></p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="password-cancel-btn">取消</button>
-        <button class="btn btn-primary" id="password-confirm-btn">
+        <button class="btn btn-secondary" id="join-modal-cancel">取消</button>
+        <button class="btn btn-primary" id="join-modal-confirm">
           <span class="btn-text">加入</span>
+          <i class="fa-solid fa-arrow-right btn-icon"></i>
         </button>
       </div>
     </div>

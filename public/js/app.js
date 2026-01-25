@@ -20,9 +20,6 @@ const socket = io();
 const createForm = document.getElementById('create-form');
 const joinForm = document.getElementById('join-form');
 
-// 密码弹窗相关状态
-let pendingJoinRoom = null;  // { roomId, userName }
-
 // ==========================================
 // 创建房间
 // ==========================================
@@ -109,10 +106,16 @@ function attemptJoinRoom(roomId, userName, password = null) {
                 return;
             }
 
-            // 如果房间有密码且没提供密码，显示密码弹窗
+            // 如果房间有密码且没提供密码，显示加入房间弹窗
             if (data.hasPassword && !password) {
-                pendingJoinRoom = { roomId, userName };
-                showPasswordModal(data.name || `房间 ${roomId}`);
+                showJoinModal(roomId, data.name || `房间 ${roomId}`, true);
+                // 预填昵称
+                setTimeout(() => {
+                    const usernameInput = document.getElementById('join-modal-username');
+                    if (usernameInput && !usernameInput.value) {
+                        usernameInput.value = userName;
+                    }
+                }, 100);
                 return;
             }
 
@@ -133,60 +136,102 @@ function attemptJoinRoom(roomId, userName, password = null) {
 }
 
 // ==========================================
-// 密码弹窗
+// 加入房间弹窗
 // ==========================================
-function showPasswordModal(roomName) {
-    const modal = document.getElementById('password-modal');
-    const roomNameEl = document.getElementById('password-room-name');
-    const passwordInput = document.getElementById('join-password');
-    const errorEl = document.getElementById('password-error');
+let pendingJoinRoomData = null;  // { roomId, roomName, hasPassword }
+
+function showJoinModal(roomId, roomName, hasPassword) {
+    pendingJoinRoomData = { roomId, roomName, hasPassword };
+
+    const modal = document.getElementById('join-modal');
+    const roomNameEl = document.getElementById('join-modal-room-name');
+    const usernameInput = document.getElementById('join-modal-username');
+    const passwordGroup = document.getElementById('join-modal-password-group');
+    const passwordInput = document.getElementById('join-modal-password');
+    const errorEl = document.getElementById('join-modal-error');
+    const titleIcon = modal.querySelector('.modal-header h3 i');
 
     roomNameEl.textContent = `加入「${roomName}」`;
+    usernameInput.value = document.getElementById('join-username')?.value.trim() ||
+        document.getElementById('create-username')?.value.trim() || '';
     passwordInput.value = '';
     errorEl.textContent = '';
+
+    // 根据是否需要密码显示/隐藏密码输入框
+    if (hasPassword) {
+        passwordGroup.style.display = 'block';
+        titleIcon.className = 'fa-solid fa-lock';
+    } else {
+        passwordGroup.style.display = 'none';
+        titleIcon.className = 'fa-solid fa-door-open';
+    }
+
     modal.classList.add('show');
-
-    setTimeout(() => passwordInput.focus(), 100);
+    setTimeout(() => usernameInput.focus(), 100);
 }
 
-function hidePasswordModal() {
-    const modal = document.getElementById('password-modal');
+function hideJoinModal() {
+    const modal = document.getElementById('join-modal');
     modal.classList.remove('show');
-    pendingJoinRoom = null;
+    pendingJoinRoomData = null;
 }
 
-// 密码弹窗事件
-document.getElementById('password-modal-close')?.addEventListener('click', hidePasswordModal);
-document.getElementById('password-cancel-btn')?.addEventListener('click', hidePasswordModal);
+// 加入房间弹窗事件
+document.getElementById('join-modal-close')?.addEventListener('click', hideJoinModal);
+document.getElementById('join-modal-cancel')?.addEventListener('click', hideJoinModal);
 
-document.getElementById('password-confirm-btn')?.addEventListener('click', () => {
-    if (!pendingJoinRoom) return;
+document.getElementById('join-modal-confirm')?.addEventListener('click', () => {
+    if (!pendingJoinRoomData) return;
 
-    const password = document.getElementById('join-password').value;
-    if (!password) {
-        document.getElementById('password-error').textContent = '请输入密码';
+    const username = document.getElementById('join-modal-username').value.trim();
+    const password = document.getElementById('join-modal-password').value;
+    const errorEl = document.getElementById('join-modal-error');
+
+    if (!username) {
+        errorEl.textContent = '请输入昵称';
         return;
     }
 
-    hidePasswordModal();
-    sessionStorage.setItem('roomPassword', password);
-    sessionStorage.setItem('userName', pendingJoinRoom.userName);
-    sessionStorage.setItem('roomId', pendingJoinRoom.roomId);
-    sessionStorage.setItem('isHost', 'false');
+    if (pendingJoinRoomData.hasPassword && !password) {
+        errorEl.textContent = '请输入房间密码';
+        return;
+    }
 
-    window.location.href = `/room.html?id=${pendingJoinRoom.roomId}`;
+    // 保存信息并跳转
+    const roomId = pendingJoinRoomData.roomId; // 先保存 roomId，因为 hideJoinModal 会清空 pendingJoinRoomData
+    sessionStorage.setItem('userName', username);
+    sessionStorage.setItem('roomId', roomId);
+    sessionStorage.setItem('isHost', 'false');
+    if (password) {
+        sessionStorage.setItem('roomPassword', password);
+    }
+
+    hideJoinModal();
+    window.location.href = `/room.html?id=${roomId}`;
 });
 
-document.getElementById('join-password')?.addEventListener('keypress', (e) => {
+// 回车键确认
+document.getElementById('join-modal-username')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
-        document.getElementById('password-confirm-btn')?.click();
+        const passwordGroup = document.getElementById('join-modal-password-group');
+        if (passwordGroup.style.display !== 'none') {
+            document.getElementById('join-modal-password').focus();
+        } else {
+            document.getElementById('join-modal-confirm')?.click();
+        }
+    }
+});
+
+document.getElementById('join-modal-password')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        document.getElementById('join-modal-confirm')?.click();
     }
 });
 
 // 点击模态框外部关闭
-document.getElementById('password-modal')?.addEventListener('click', (e) => {
-    if (e.target.id === 'password-modal') {
-        hidePasswordModal();
+document.getElementById('join-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'join-modal') {
+        hideJoinModal();
     }
 });
 
@@ -238,18 +283,9 @@ function createRoomCard(room) {
         </button>
     `;
 
-    // 加入按钮事件
+    // 加入按钮事件 - 打开加入房间弹窗
     card.querySelector('.btn-join').addEventListener('click', () => {
-        const userName = document.getElementById('join-username').value.trim() ||
-            document.getElementById('create-username').value.trim();
-
-        if (!userName) {
-            showToast('请先在上方输入你的昵称', 'error');
-            document.getElementById('join-username').focus();
-            return;
-        }
-
-        attemptJoinRoom(room.id, userName);
+        showJoinModal(room.id, room.name, room.hasPassword);
     });
 
     return card;

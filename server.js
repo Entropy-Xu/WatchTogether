@@ -1034,9 +1034,12 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 密码验证
-    if (room.hasPassword) {
+    // 密码验证 - 跳过第一个加入的用户（房主/创建者）
+    console.log(`[join-room] 房间 ${roomId}: hasPassword=${room.hasPassword}, users.size=${room.users.size}, 提供的密码=${password ? '有' : '无'}`);
+
+    if (room.hasPassword && room.users.size > 0) {
       if (!password) {
+        console.log(`[join-room] 拒绝: 未提供密码`);
         callback({
           success: false,
           error: '该房间需要密码',
@@ -1046,6 +1049,7 @@ io.on('connection', (socket) => {
         return;
       }
       if (!room.verifyPassword(password)) {
+        console.log(`[join-room] 拒绝: 密码错误`);
         callback({
           success: false,
           error: '密码错误',
@@ -1054,6 +1058,7 @@ io.on('connection', (socket) => {
         });
         return;
       }
+      console.log(`[join-room] 密码验证通过`);
     }
 
     // 如果没有 userId，使用 socket.id 作为临时 ID (降级兼容)

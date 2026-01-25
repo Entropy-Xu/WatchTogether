@@ -288,13 +288,19 @@
   <div id="join-modal" class="modal-overlay">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>加入放映室</h3>
+        <h3 id="join-modal-header">加入放映室</h3>
       </div>
       <div class="modal-body">
-        <p>请输入你的昵称以加入房间</p>
+        <p id="join-modal-desc">请输入你的昵称以加入房间</p>
         <div class="input-group">
+          <label for="join-name-input">昵称</label>
           <input type="text" id="join-name-input" placeholder="你的昵称" maxlength="10">
         </div>
+        <div class="input-group" id="join-password-group" style="display: none;">
+          <label for="join-password-input">房间密码</label>
+          <input type="password" id="join-password-input" placeholder="输入房间密码" maxlength="20">
+        </div>
+        <p id="join-error" class="error-text"></p>
       </div>
       <div class="modal-footer">
         <button id="join-btn" class="btn btn-primary primary-glow" style="width: 100%;">加入房间</button>
