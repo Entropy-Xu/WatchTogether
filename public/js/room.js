@@ -1629,12 +1629,24 @@ function initCustomControls() {
     // Volume
     volumeSlider.addEventListener('input', (e) => {
         player.volume(e.target.value);
+        // 同步音量到 MSE 音频元素 (B站视频)
+        if (window.currentMseAudio) {
+            window.currentMseAudio.volume = e.target.value;
+        }
     });
 
     player.on('volumechange', () => {
         const vol = player.volume();
+        const isMuted = player.muted();
         volumeSlider.value = vol;
-        if (player.muted() || vol === 0) {
+
+        // 同步音量和静音状态到 MSE 音频元素 (B站视频)
+        if (window.currentMseAudio) {
+            window.currentMseAudio.volume = vol;
+            window.currentMseAudio.muted = isMuted;
+        }
+
+        if (isMuted || vol === 0) {
             volumeBtn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
         } else if (vol < 0.5) {
             volumeBtn.innerHTML = '<i class="fa-solid fa-volume-low"></i>';
@@ -1645,6 +1657,10 @@ function initCustomControls() {
 
     volumeBtn.addEventListener('click', () => {
         player.muted(!player.muted());
+        // 同步静音状态到 MSE 音频元素 (B站视频)
+        if (window.currentMseAudio) {
+            window.currentMseAudio.muted = player.muted();
+        }
     });
 
     // Speed
