@@ -2715,3 +2715,186 @@ input::placeholder {
   pointer-events: auto;
   opacity: 1;
 }
+
+/* ==========================================
+   Mobile Optimization (Responsive)
+   ========================================== */
+
+@media (max-width: 768px) {
+
+  /* Global Adjustments */
+  html {
+    font-size: 14px;
+  }
+
+  .home-container {
+    padding: 1rem;
+    gap: 1.5rem;
+  }
+
+  /* Home Page Cards */
+  .card-container {
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 100%;
+    padding: 1.5rem;
+  }
+
+  .logo h1 {
+    font-size: 2.2rem;
+  }
+
+  .logo-icon {
+    font-size: 2.5rem;
+  }
+
+  /* Room Page Header */
+  .room-header {
+    padding: 0.6rem 0.8rem;
+    /* Reduced padding */
+    gap: 0.5rem;
+    height: auto;
+    min-height: 60px;
+    flex-wrap: nowrap;
+    /* Try to keep on one line first */
+  }
+
+  .header-left {
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* Hide Room Title on Mobile to save space */
+  .room-title {
+    display: none;
+  }
+
+  .room-info {
+    gap: 0.5rem;
+  }
+
+  .room-id-badge {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  /* Make copy button compact */
+  .copy-btn span {
+    display: none;
+  }
+
+  .header-right {
+    gap: 0.6rem;
+    flex-shrink: 0;
+  }
+
+  /* Hide 'Online' text */
+  .user-count span {
+    display: none;
+  }
+
+  /* Compact user count */
+  .user-count {
+    padding: 0.3rem 0.6rem;
+  }
+
+  /* Video Section - Vertical Stack */
+  .video-url-bar {
+    padding: 1rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.8rem;
+  }
+
+  .url-input-wrapper {
+    width: 100%;
+    /* Increase height for better touch */
+    padding: 0.8rem 1rem;
+  }
+
+  .load-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.8rem;
+    /* Taller button */
+  }
+
+  .divider-text {
+    display: none;
+    /* Hide divider in vertical layout */
+  }
+
+  .upload-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.8rem;
+    margin-top: 0;
+    /* Removing potential margin */
+  }
+
+  /* Bilibili Input Wrapper */
+  .bilibili-input-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.8rem;
+  }
+
+  #bilibili-url-input {
+    min-width: auto;
+    padding: 0.8rem;
+  }
+
+  .bilibili-btn,
+  .bilibili-login-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 0.8rem;
+  }
+
+  .bilibili-play-btn {
+    margin-top: 0.8rem;
+    padding: 0.8rem;
+  }
+
+  /* Modals */
+  .modal-content {
+    width: 95%;
+    /* Almost full width */
+    padding: 1.5rem;
+    max-height: 85vh;
+    margin: 10px;
+    /* Slight margin from edges */
+  }
+
+  .modal-header h3 {
+    font-size: 1.3rem;
+  }
+
+  /* Feature List on Home */
+  .features {
+    gap: 1rem;
+  }
+
+  .feature {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+
+  /* Ultra-small screens specific tweaks */
+  .room-header {
+    padding: 0.5rem;
+  }
+
+  .room-id-badge {
+    font-size: 0.8rem;
+  }
+}

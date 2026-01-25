@@ -285,6 +285,32 @@ function initSocket() {
         showNotification(`${triggeredBy} 调整了进度`);
     });
 
+    // 同步播放速度
+    socket.on('sync-speed', ({ playbackRate, triggeredBy }) => {
+        if (!player) return;
+
+        isSyncing = true;
+        updateSyncStatus('syncing', '同步中...');
+
+        player.playbackRate(playbackRate);
+        // 同步音频播放速度 (MSE 模式)
+        if (window.currentMseAudio) {
+            window.currentMseAudio.playbackRate = playbackRate;
+        }
+        // 更新速度显示
+        const speedDisplay = document.getElementById('current-speed');
+        if (speedDisplay) {
+            speedDisplay.textContent = playbackRate + 'x';
+        }
+
+        setTimeout(() => {
+            isSyncing = false;
+            updateSyncStatus('', '已同步');
+        }, 500);
+
+        showNotification(`${triggeredBy} 调整了播放速度为 ${playbackRate}x`);
+    });
+
     // 强制同步
     socket.on('force-sync', ({ videoUrl, videoState }) => {
         if (videoUrl) {
@@ -460,7 +486,7 @@ function joinRoom() {
             // 加载现有视频
             if (response.videoUrl) {
                 document.getElementById('video-url-input').value = response.videoUrl;
-                loadVideo(response.videoUrl);
+                loadVideo(response.videoUrl, response.mseData);
 
                 // 加载字幕
                 if (response.subtitleUrl) {
@@ -470,10 +496,21 @@ function joinRoom() {
                     }, 500);
                 }
 
-                // 同步到当前进度
+                // 同步到当前进度和播放速度
                 setTimeout(() => {
                     if (player && response.videoState) {
                         player.currentTime(response.videoState.currentTime);
+                        // 同步播放速度
+                        if (response.videoState.playbackRate && response.videoState.playbackRate !== 1) {
+                            player.playbackRate(response.videoState.playbackRate);
+                            if (window.currentMseAudio) {
+                                window.currentMseAudio.playbackRate = response.videoState.playbackRate;
+                            }
+                            const speedDisplay = document.getElementById('current-speed');
+                            if (speedDisplay) {
+                                speedDisplay.textContent = response.videoState.playbackRate + 'x';
+                            }
+                        }
                         if (response.videoState.isPlaying) {
                             player.play();
                         }
@@ -1619,7 +1656,15 @@ function initCustomControls() {
             }
             const speed = parseFloat(opt.dataset.speed);
             player.playbackRate(speed);
+            // 同步音频播放速度 (MSE 模式)
+            if (window.currentMseAudio) {
+                window.currentMseAudio.playbackRate = speed;
+            }
             speedDisplay.textContent = speed + 'x';
+            // 同步到其他客户端
+            if (!isSyncing) {
+                socket.emit('video-speed', { playbackRate: speed });
+            }
         });
     });
 

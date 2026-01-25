@@ -103,6 +103,7 @@ class Room {
     this.videoState = {
       isPlaying: false,
       currentTime: 0,
+      playbackRate: 1,
       lastUpdated: Date.now()
     };
     this.users = new Map(); // socketId -> { name, joinedAt, isHost }
@@ -1015,6 +1016,7 @@ io.on('connection', (socket) => {
       isHost: room.isHost(socket.id),
       videoUrl: room.videoUrl,
       subtitleUrl: room.subtitleUrl,
+      mseData: room.mseData || null, // B站视频的分离音视频数据
       videoState: room.videoState,
       userList: room.getUserList(),
       messages: room.messages.slice(-50), // 发送最近50条消息
@@ -1121,6 +1123,21 @@ io.on('connection', (socket) => {
 
     socket.to(currentRoom).emit('sync-seek', {
       currentTime,
+      triggeredBy: currentUserName
+    });
+  });
+
+  // 播放速度同步
+  socket.on('video-speed', ({ playbackRate }) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    room.videoState.playbackRate = playbackRate;
+    room.videoState.lastUpdated = Date.now();
+
+    socket.to(currentRoom).emit('sync-speed', {
+      playbackRate,
       triggeredBy: currentUserName
     });
   });
