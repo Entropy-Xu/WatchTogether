@@ -95,9 +95,11 @@ const rooms = new Map();
 
 // 房间数据结构
 class Room {
-  constructor(id, hostName) {
+  constructor(id, hostName, roomName = null, password = null) {
     this.id = id;
     this.hostName = hostName;
+    this.name = roomName || `${hostName}的放映室`;  // 房间名称
+    this.password = password || null;               // 房间密码 (null = 公开)
     this.videoUrl = '';
     this.subtitleUrl = null; // 字幕 URL
     this.videoState = {
@@ -120,6 +122,17 @@ class Room {
 
     // 房主的用户 ID (用于重连恢复权限)
     this.hostUserId = null;
+  }
+
+  // 检查是否需要密码
+  get hasPassword() {
+    return this.password !== null && this.password !== '';
+  }
+
+  // 验证密码
+  verifyPassword(inputPassword) {
+    if (!this.hasPassword) return true;
+    return this.password === inputPassword;
   }
 
   /**
@@ -418,11 +431,39 @@ app.get('/api/room/:roomId', (req, res) => {
     res.json({
       exists: true,
       userCount: room.users.size,
-      hostName: room.hostName
+      hostName: room.hostName,
+      name: room.name,
+      hasPassword: room.hasPassword
     });
   } else {
     res.json({ exists: false });
   }
+});
+
+// 获取所有房间列表 (大厅)
+app.get('/api/rooms', (req, res) => {
+  const roomList = [];
+  rooms.forEach((room, id) => {
+    // 只显示有用户的房间
+    if (room.users.size > 0) {
+      roomList.push({
+        id,
+        name: room.name,
+        hostName: room.hostName,
+        userCount: room.users.size,
+        hasPassword: room.hasPassword,
+        createdAt: room.createdAt
+      });
+    }
+  });
+
+  // 按创建时间倒序排序
+  roomList.sort((a, b) => b.createdAt - a.createdAt);
+
+  res.json({
+    success: true,
+    rooms: roomList
+  });
 });
 
 // ============ B 站相关 API ============
@@ -967,15 +1008,15 @@ io.on('connection', (socket) => {
   let currentUserName = null;
 
   // 创建房间
-  socket.on('create-room', ({ userName }, callback) => {
+  socket.on('create-room', ({ userName, roomName, password }, callback) => {
     const roomId = uuidv4().substring(0, 8).toUpperCase();
-    const room = new Room(roomId, userName);
+    const room = new Room(roomId, userName, roomName || null, password || null);
     // 不要在这里添加用户和设置 hostId
     // 让用户跳转到 room.html 后通过 join-room 加入
     // addUser 会自动将第一个用户设为房主
     rooms.set(roomId, room);
 
-    console.log(`房间创建: ${roomId} by ${userName}`);
+    console.log(`房间创建: ${roomId} "${room.name}" by ${userName}${room.hasPassword ? ' [密码保护]' : ''}`);
 
     callback({
       success: true,
@@ -985,12 +1026,34 @@ io.on('connection', (socket) => {
   });
 
   // 加入房间
-  socket.on('join-room', ({ roomId, userName, userId }, callback) => {
+  socket.on('join-room', ({ roomId, userName, userId, password }, callback) => {
     const room = rooms.get(roomId);
 
     if (!room) {
       callback({ success: false, error: '房间不存在' });
       return;
+    }
+
+    // 密码验证
+    if (room.hasPassword) {
+      if (!password) {
+        callback({
+          success: false,
+          error: '该房间需要密码',
+          needPassword: true,
+          roomName: room.name
+        });
+        return;
+      }
+      if (!room.verifyPassword(password)) {
+        callback({
+          success: false,
+          error: '密码错误',
+          needPassword: true,
+          roomName: room.name
+        });
+        return;
+      }
     }
 
     // 如果没有 userId，使用 socket.id 作为临时 ID (降级兼容)

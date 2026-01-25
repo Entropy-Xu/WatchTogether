@@ -43,6 +43,19 @@
             <label for="create-username">你的昵称</label>
             <input type="text" id="create-username" placeholder="输入昵称..." maxlength="20" required autocomplete="off">
           </div>
+          <div class="input-group">
+            <label for="room-name">房间名称 <span class="optional">(选填)</span></label>
+            <input type="text" id="room-name" placeholder="给房间起个名字..." maxlength="30" autocomplete="off">
+          </div>
+          <div class="input-group">
+            <label for="room-password">房间密码 <span class="optional">(选填)</span></label>
+            <div class="password-input-wrapper">
+              <input type="password" id="room-password" placeholder="设置密码..." maxlength="20" autocomplete="off">
+              <button type="button" class="toggle-password" tabindex="-1" aria-label="显示密码">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+            </div>
+          </div>
           <button type="submit" class="btn btn-primary">
             <span class="btn-text">创建放映室</span>
             <i class="fa-solid fa-arrow-right btn-icon"></i>
@@ -80,6 +93,21 @@
       </div>
     </div>
 
+    <!-- 大厅 - 房间列表 -->
+    <section class="lobby-section">
+      <div class="lobby-header">
+        <h2><i class="fa-solid fa-earth-asia"></i> 公开放映室</h2>
+        <button id="refresh-rooms-btn" class="btn-icon-only" title="刷新列表">
+          <i class="fa-solid fa-rotate"></i>
+        </button>
+      </div>
+      <div id="room-list" class="room-list">
+        <div class="room-list-loading">
+          <i class="fa-solid fa-spinner fa-spin"></i> 加载中...
+        </div>
+      </div>
+    </section>
+
     <footer class="home-footer">
       <div class="features">
         <div class="feature">
@@ -97,6 +125,29 @@
       </div>
     </footer>
   </main>
+
+  <!-- 密码输入弹窗 -->
+  <div id="password-modal" class="modal">
+    <div class="modal-content password-modal-content">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-lock"></i> 需要密码</h3>
+        <button class="close-btn" id="password-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="password-room-name">该房间需要密码才能加入</p>
+        <div class="input-group">
+          <input type="password" id="join-password" placeholder="输入房间密码..." maxlength="20" autocomplete="off">
+        </div>
+        <p id="password-error" class="error-text"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="password-cancel-btn">取消</button>
+        <button class="btn btn-primary" id="password-confirm-btn">
+          <span class="btn-text">加入</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast 提示 -->
   <div id="toast" class="toast"></div>

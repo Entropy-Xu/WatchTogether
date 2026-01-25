@@ -462,8 +462,12 @@ function joinRoom() {
 
     // 发送 userId 以便后端识别用户身份
     const userId = getOrCreateUserId();
+    // 获取密码（如果有）
+    const password = sessionStorage.getItem('roomPassword') || null;
+    // 使用后清除密码
+    sessionStorage.removeItem('roomPassword');
 
-    socket.emit('join-room', { roomId, userName, userId }, (response) => {
+    socket.emit('join-room', { roomId, userName, userId, password }, (response) => {
         if (response.success) {
             showConnectionOverlay(false);
             updateSyncStatus('', '已同步');
