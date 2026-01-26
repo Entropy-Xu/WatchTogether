@@ -3204,34 +3204,97 @@ input::placeholder {
 /* 解析进度条 */
 .parser-progress {
   display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 0;
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.parser-progress .progress-info {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.parser-progress .progress-percent {
+  font-family: 'SF Mono', monospace;
+  font-weight: 600;
+  color: var(--primary-light);
 }
 
 .parser-progress .progress-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(139, 92, 246, 0.2);
-  border-radius: 3px;
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
   overflow: hidden;
+  position: relative;
 }
 
 .parser-progress .progress-fill {
   height: 100%;
   width: 0%;
   background: linear-gradient(90deg, #8b5cf6 0%, #a78bfa 100%);
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.3s ease-out;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+  position: relative;
+}
+
+/* Indeterminate / Active Animation (Stripes) */
+.parser-progress .progress-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.15) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 1rem 1rem;
+  animation: progress-stripes 1s linear infinite;
+  z-index: 1;
+}
+
+@keyframes progress-stripes {
+  0% {
+    background-position: 1rem 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
 }
 
 .parser-progress .progress-text {
   font-size: 0.85rem;
   color: var(--text-secondary);
-  min-width: 150px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 80%;
+}
+
+/* Error State */
+.parser-progress.error .progress-fill {
+  background: var(--error);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.4);
+}
+
+.parser-progress.error .progress-text,
+.parser-progress.error .progress-percent {
+  color: var(--error);
 }
 
 /* 解析预览弹窗 */

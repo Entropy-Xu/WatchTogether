@@ -3010,8 +3010,19 @@ function showParserProgress(show) {
 function updateParserProgress(percent, message) {
     const bar = document.getElementById('parser-progress-bar');
     const text = document.getElementById('parser-progress-text');
-    if (bar) bar.style.width = `${percent}%`;
+    const percentText = document.getElementById('parser-progress-percent');
+    
+    if (bar) {
+        bar.style.width = `${percent}%`;
+        // Error state handling
+        if (message && (message.includes('失败') || message.includes('错误') || message.includes('Error'))) {
+             bar.parentElement.parentElement.classList.add('error');
+        } else {
+             bar.parentElement.parentElement.classList.remove('error');
+        }
+    }
     if (text) text.textContent = message;
+    if (percentText) percentText.textContent = `${percent}%`;
 }
 
 /**
