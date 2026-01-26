@@ -1802,6 +1802,14 @@ function initCustomControls() {
     });
 
     // Speed
+    // Toggle menu on click for better mobile/desktop experience
+    const speedSelector = document.querySelector('.speed-selector');
+
+    speedDisplay.addEventListener('click', (e) => {
+        e.stopPropagation();
+        speedMenu.classList.toggle('show');
+    });
+
     document.querySelectorAll('.speed-option').forEach(opt => {
         opt.addEventListener('click', () => {
             if (!canControlPlayer()) {
@@ -1815,6 +1823,10 @@ function initCustomControls() {
                 window.currentMseAudio.playbackRate = speed;
             }
             speedDisplay.textContent = speed + 'x';
+
+            // Close menu
+            speedMenu.classList.remove('show');
+
             // 同步到其他客户端
             if (!isSyncing) {
                 socket.emit('video-speed', { playbackRate: speed });
@@ -1891,6 +1903,22 @@ function initCustomControls() {
 
     // Subtitle Selector
     initSubtitleSelector();
+
+    // Global click listener to close menus
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.speed-selector')) {
+            const speedMenu = document.querySelector('.speed-menu');
+            if (speedMenu) speedMenu.classList.remove('show');
+        }
+        if (!e.target.closest('.audio-track-selector') && !e.target.closest('#audio-selector')) {
+            const audioMenu = document.getElementById('audio-menu');
+            if (audioMenu) audioMenu.classList.remove('show');
+        }
+        if (!e.target.closest('.subtitle-selector') && !e.target.closest('#subtitle-selector')) {
+            const subtitleMenu = document.getElementById('subtitle-menu');
+            if (subtitleMenu) subtitleMenu.classList.remove('show');
+        }
+    });
 }
 
 function formatDuration(seconds) {
@@ -1933,13 +1961,24 @@ function initAudioTrackSelector() {
                 audioMenu.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
                 item.classList.add('active');
                 showToast(`已切换到: ${track.name || '音轨 ' + (index + 1)}`, 'success');
+                audioMenu.classList.remove('show'); // Close menu
             });
 
             audioMenu.appendChild(item);
         });
 
-        console.log('[AudioSelector] 已更新音轨列表，共', currentHls.audioTracks.length, '个音轨');
     }
+
+    // Add toggle support
+    const btn = audioSelector.querySelector('.control-btn');
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            audioMenu.classList.toggle('show');
+        });
+    }
+
+    // Check periodically for HLS instance
 
     // Check periodically for HLS instance
     const checkInterval = setInterval(() => {
@@ -1979,7 +2018,9 @@ function initSubtitleSelector() {
             }
             subtitleMenu.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
             offItem.classList.add('active');
+            offItem.classList.add('active');
             showToast('字幕已关闭', 'success');
+            subtitleMenu.classList.remove('show'); // Close menu
         });
         subtitleMenu.appendChild(offItem);
 
@@ -2002,7 +2043,9 @@ function initSubtitleSelector() {
                 track.mode = 'showing';
                 subtitleMenu.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
                 item.classList.add('active');
+                item.classList.add('active');
                 showToast(`已启用: ${track.label || '字幕 ' + (i + 1)}`, 'success');
+                subtitleMenu.classList.remove('show'); // Close menu
             });
 
             subtitleMenu.appendChild(item);
@@ -2017,6 +2060,15 @@ function initSubtitleSelector() {
 
     // Initial update
     updateSubtitleMenu();
+
+    // Add toggle support
+    const btn = subtitleSelector.querySelector('.control-btn');
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            subtitleMenu.classList.toggle('show');
+        });
+    }
 
     // Listen for track changes
     player.textTracks().addEventListener('addtrack', updateSubtitleMenu);
