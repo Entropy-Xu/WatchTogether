@@ -615,6 +615,48 @@ input::placeholder {
   box-shadow: 0 0 8px var(--error);
 }
 
+/* P2P 状态指示器 */
+.p2p-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.p2p-status:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.p2p-status i {
+  font-size: 0.9rem;
+  color: var(--success);
+}
+
+.p2p-status.inactive i {
+  color: var(--text-muted);
+}
+
+.p2p-status.active i {
+  color: var(--success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.p2p-peers {
+  font-weight: 500;
+}
+
 .user-count {
   display: flex;
   align-items: center;

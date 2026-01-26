@@ -608,7 +608,7 @@ app.post('/api/parser/parse', async (req, res) => {
   }
 });
 
-// 视频流代理（处理防盗链）
+// 视频流代理（处理防盗链和 CORS）
 app.get('/api/parser/proxy', async (req, res) => {
   const { url, referer } = req.query;
 
@@ -640,14 +640,60 @@ app.get('/api/parser/proxy', async (req, res) => {
     }, (proxyRes) => {
       res.status(proxyRes.statusCode);
 
-      // 转发响应头
-      ['content-type', 'content-length', 'content-range', 'accept-ranges']
-        .forEach(h => {
-          if (proxyRes.headers[h]) res.setHeader(h, proxyRes.headers[h]);
-        });
-
+      // 设置 CORS 头
       res.setHeader('Access-Control-Allow-Origin', '*');
-      proxyRes.pipe(res);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Range');
+
+      // 判断是否是 m3u8 文件
+      const contentType = proxyRes.headers['content-type'] || '';
+      const isM3u8 = url.includes('.m3u8') || contentType.includes('mpegurl') || contentType.includes('m3u8');
+
+      if (isM3u8) {
+        // 收集 m3u8 内容并重写其中的 URL
+        let data = '';
+        proxyRes.setEncoding('utf8');
+        proxyRes.on('data', chunk => data += chunk);
+        proxyRes.on('end', () => {
+          const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
+          const proxyBase = `/api/parser/proxy?referer=${encodeURIComponent(referer || urlObj.origin)}&url=`;
+          
+          // 重写相对路径和绝对路径
+          const rewritten = data.split('\n').map(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) {
+              // 处理 #EXT-X-KEY 等标签中的 URI
+              if (line.includes('URI="')) {
+                return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+                  if (uri.startsWith('http://') || uri.startsWith('https://')) {
+                    return `URI="${proxyBase}${encodeURIComponent(uri)}"`;
+                  } else {
+                    return `URI="${proxyBase}${encodeURIComponent(baseUrl + uri)}"`;
+                  }
+                });
+              }
+              return line;
+            }
+            // 普通的 URL 行（ts 片段等）
+            if (line.startsWith('http://') || line.startsWith('https://')) {
+              return proxyBase + encodeURIComponent(line);
+            } else {
+              return proxyBase + encodeURIComponent(baseUrl + line);
+            }
+          }).join('\n');
+
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.send(rewritten);
+        });
+      } else {
+        // 非 m3u8 文件直接转发
+        ['content-type', 'content-length', 'content-range', 'accept-ranges']
+          .forEach(h => {
+            if (proxyRes.headers[h]) res.setHeader(h, proxyRes.headers[h]);
+          });
+
+        proxyRes.pipe(res);
+      }
     });
 
     proxyReq.on('error', (err) => {
@@ -1764,6 +1810,77 @@ io.on('connection', (socket) => {
     });
   });
 
+  // ============ P2P 视频片段共享信令 ============
+
+  // 加入 P2P 网络
+  socket.on('p2p-join', () => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    // 初始化 P2P 用户列表
+    if (!room.p2pPeers) {
+      room.p2pPeers = new Set();
+    }
+
+    // 通知现有 P2P 用户有新用户加入
+    room.p2pPeers.forEach(peerId => {
+      if (peerId !== socket.id) {
+        io.to(peerId).emit('p2p-peer-joined', {
+          peerId: socket.id,
+          peerName: currentUserName
+        });
+      }
+    });
+
+    // 加入 P2P 网络
+    room.p2pPeers.add(socket.id);
+    console.log(`[P2P] ${currentUserName} 加入房间 ${currentRoom} 的 P2P 网络, 当前 ${room.p2pPeers.size} 人`);
+  });
+
+  // 离开 P2P 网络
+  socket.on('p2p-leave', () => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || !room.p2pPeers) return;
+
+    room.p2pPeers.delete(socket.id);
+
+    // 通知其他用户
+    room.p2pPeers.forEach(peerId => {
+      io.to(peerId).emit('p2p-peer-left', { peerId: socket.id });
+    });
+
+    console.log(`[P2P] ${currentUserName} 离开房间 ${currentRoom} 的 P2P 网络`);
+  });
+
+  // 转发 P2P Offer
+  socket.on('p2p-offer', ({ targetId, offer }) => {
+    if (!currentRoom) return;
+    io.to(targetId).emit('p2p-offer', {
+      fromId: socket.id,
+      offer
+    });
+  });
+
+  // 转发 P2P Answer
+  socket.on('p2p-answer', ({ targetId, answer }) => {
+    if (!currentRoom) return;
+    io.to(targetId).emit('p2p-answer', {
+      fromId: socket.id,
+      answer
+    });
+  });
+
+  // 转发 P2P ICE Candidate
+  socket.on('p2p-ice', ({ targetId, candidate }) => {
+    if (!currentRoom) return;
+    io.to(targetId).emit('p2p-ice', {
+      fromId: socket.id,
+      candidate
+    });
+  });
+
   // 请求同步用户列表 (用于 UI 状态刷新)
   socket.on('request-user-list', () => {
     if (!currentRoom) return;
@@ -1796,6 +1913,15 @@ io.on('connection', (socket) => {
             reason: 'disconnected'
           });
           console.log(`[屏幕共享] ${currentUserName} 断开连接，共享已停止`);
+        }
+
+        // 清理 P2P 状态
+        if (room.p2pPeers && room.p2pPeers.has(socket.id)) {
+          room.p2pPeers.delete(socket.id);
+          // 通知其他 P2P 用户
+          room.p2pPeers.forEach(peerId => {
+            io.to(peerId).emit('p2p-peer-left', { peerId: socket.id });
+          });
         }
 
         // 通知其他用户

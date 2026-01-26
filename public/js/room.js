@@ -28,6 +28,10 @@ let currentSharer = null;          // 当前共享者信息 { id, name }
 let connectionRetryCount = 0;      // P2P 连接重试次数
 const MAX_RETRY_COUNT = 3;         // 最大重试次数
 
+// P2P 视频片段共享
+let p2pLoader = null;              // P2P 加载器实例
+let p2pEnabled = true;             // P2P 开关
+
 // P2P 连接质量监控
 let statsInterval = null;          // 统计定时器
 let lastBytesReceived = 0;         // 上次收到的字节数
@@ -628,6 +632,13 @@ function joinRoom() {
                 }, 500);
             }
 
+            // 初始化 P2P 视频片段共享
+            if (typeof P2PLoader !== 'undefined' && p2pEnabled) {
+                p2pLoader = new P2PLoader(socket, roomId, rtcConfig);
+                p2pLoader.join();
+                console.log('[P2P] 视频片段共享已启动');
+            }
+
             showToast(`已加入放映室 ${roomId}`, 'success');
         } else {
             showConnectionOverlay(false);
@@ -710,6 +721,65 @@ function initVideoPlayer() {
     }
 }
 
+/**
+ * 创建 P2P 片段加载器（用于 HLS.js）
+ * 优先从 P2P 网络获取片段，失败时回退到 HTTP
+ */
+function createP2PFragmentLoader(p2pLoader) {
+    return class P2PFragmentLoader extends Hls.DefaultConfig.loader {
+        constructor(config) {
+            super(config);
+            this.p2pLoader = p2pLoader;
+        }
+
+        load(context, config, callbacks) {
+            const url = context.url;
+            const isSegment = context.type === 'fragment';
+            
+            // 只对视频片段使用 P2P
+            if (isSegment && this.p2pLoader && this.p2pLoader.enabled) {
+                // 尝试从 P2P 获取
+                this.p2pLoader.getSegment(url).then(data => {
+                    if (data) {
+                        // P2P 获取成功
+                        console.log(`[P2P] 从 P2P 加载片段: ${url.substring(0, 60)}...`);
+                        const response = {
+                            url,
+                            data
+                        };
+                        callbacks.onSuccess(response, { url }, context, null);
+                    } else {
+                        // P2P 失败，回退到 HTTP
+                        this._loadViaHttp(context, config, callbacks);
+                    }
+                }).catch(() => {
+                    // 出错时回退到 HTTP
+                    this._loadViaHttp(context, config, callbacks);
+                });
+            } else {
+                // 非片段请求（如 m3u8）直接用 HTTP
+                this._loadViaHttp(context, config, callbacks);
+            }
+        }
+
+        _loadViaHttp(context, config, callbacks) {
+            // 包装原始回调，在成功时缓存到 P2P
+            const originalOnSuccess = callbacks.onSuccess;
+            callbacks.onSuccess = (response, stats, context, networkDetails) => {
+                // 如果是片段，缓存到 P2P
+                if (context.type === 'fragment' && this.p2pLoader && response.data) {
+                    this.p2pLoader.addToCache(context.url, response.data);
+                    this.p2pLoader.stats.httpDownloaded += response.data.byteLength || 0;
+                }
+                originalOnSuccess(response, stats, context, networkDetails);
+            };
+            
+            // 调用父类的 HTTP 加载
+            super.load(context, config, callbacks);
+        }
+    };
+}
+
 function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
     if (!player || !url) return;
 
@@ -729,7 +799,18 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
     document.getElementById('video-hint').style.display = 'flex';
 
     // 根据 URL 扩展名判断视频类型
-    const urlLower = url.toLowerCase();
+    // 对于代理 URL，提取原始 URL 进行类型检测
+    let urlForTypeDetection = url;
+    if (url.includes('/api/parser/proxy?url=')) {
+        try {
+            const proxyParams = new URLSearchParams(url.split('?')[1]);
+            urlForTypeDetection = decodeURIComponent(proxyParams.get('url') || url);
+        } catch (e) {
+            console.log('解析代理 URL 失败:', e);
+        }
+    }
+    
+    const urlLower = urlForTypeDetection.toLowerCase();
     let type = 'video/mp4'; // 默认
 
     // MIME 类型映射
@@ -861,10 +942,20 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         console.log('使用 hls.js 加载 HLS 流');
 
         const videoElement = player.tech({ IWillNotUseThisInPlugins: true }).el();
-        const hls = new Hls({
+        
+        // 配置 HLS.js，集成 P2P 加载
+        const hlsConfig = {
             enableWorker: true,
             lowLatencyMode: false
-        });
+        };
+        
+        // 如果启用了 P2P，添加自定义片段加载器
+        if (p2pLoader && p2pEnabled) {
+            hlsConfig.fLoader = createP2PFragmentLoader(p2pLoader);
+            console.log('[P2P] 已启用 HLS P2P 加载');
+        }
+        
+        const hls = new Hls(hlsConfig);
 
         // Store reference for audio track selector
         currentHls = hls;
@@ -897,8 +988,24 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
 
         hls.on(Hls.Events.ERROR, (event, data) => {
             console.error('HLS 错误:', data);
+            console.log('当前 URL:', url);
+            console.log('是否已使用代理:', url.includes('/api/parser/proxy'));
+            
+            // 检查是否是 CORS 或网络错误，尝试使用代理
+            if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR && !url.includes('/api/parser/proxy')) {
+                console.log('HLS 网络错误，尝试使用代理...');
+                hls.destroy();
+                
+                // 使用代理 URL 重试
+                const proxyUrl = `/api/parser/proxy?url=${encodeURIComponent(url)}`;
+                console.log('代理 URL:', proxyUrl);
+                showToast('尝试通过代理加载...', 'info');
+                loadVideo(proxyUrl, startTime, autoPlay);
+                return;
+            }
+            
             if (data.fatal) {
-                showToast('视频加载失败', 'error');
+                showToast('视频加载失败，可能需要通过代理访问', 'error');
                 isSyncing = false;
             }
         });
@@ -1263,6 +1370,54 @@ function updateUserList(users) {
         userList.appendChild(li);
     });
 }
+
+/**
+ * 更新 P2P 状态显示
+ */
+function updateP2PStatus() {
+    const statusEl = document.getElementById('p2p-status');
+    if (!statusEl) return;
+    
+    const peersEl = statusEl.querySelector('.p2p-peers');
+    
+    if (p2pLoader && p2pEnabled) {
+        const stats = p2pLoader.getStats();
+        peersEl.textContent = stats.connectedPeers;
+        
+        if (stats.connectedPeers > 0) {
+            statusEl.classList.add('active');
+            statusEl.classList.remove('inactive');
+            statusEl.title = `P2P 已连接 ${stats.connectedPeers} 个用户\n` +
+                `P2P 下载: ${formatBytes(stats.p2pDownloaded)}\n` +
+                `P2P 上传: ${formatBytes(stats.p2pUploaded)}\n` +
+                `HTTP 下载: ${formatBytes(stats.httpDownloaded)}\n` +
+                `P2P 占比: ${stats.p2pRatio}%`;
+        } else {
+            statusEl.classList.remove('active');
+            statusEl.classList.add('inactive');
+            statusEl.title = 'P2P 等待其他用户连接...';
+        }
+    } else {
+        statusEl.classList.remove('active');
+        statusEl.classList.add('inactive');
+        peersEl.textContent = '-';
+        statusEl.title = 'P2P 未启用';
+    }
+}
+
+/**
+ * 格式化字节数
+ */
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// 定时更新 P2P 状态
+setInterval(updateP2PStatus, 2000);
 
 // ==========================================
 // 聊天功能

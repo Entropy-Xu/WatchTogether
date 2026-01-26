@@ -58,6 +58,10 @@
           <span class="sync-dot"></span>
           <span class="sync-text">已同步</span>
         </div>
+        <div class="p2p-status" id="p2p-status" title="P2P 视频共享状态">
+          <i class="fa-solid fa-share-nodes"></i>
+          <span class="p2p-peers">0</span>
+        </div>
         <div class="user-count" id="user-count">
           <i class="fa-solid fa-users user-icon"></i>
           <span class="count">1</span>
@@ -742,6 +746,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://unpkg.com/hls.js@latest/dist/hls.min.js"></script>
   <script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
+  <script src="js/p2p-loader.js"></script>
   <script src="js/room.js"></script>
 </body>
 
