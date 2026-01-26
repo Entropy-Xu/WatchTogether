@@ -2946,22 +2946,43 @@ async function confirmLoadParsedVideo() {
             throw new Error(data.error);
         }
 
-        // 获取视频 URL
-        let videoUrl = data.data.url;
-
-        // 如果需要代理（防盗链）
-        if (data.data.needsProxy && data.data.type === 'direct') {
-            videoUrl = `/api/parser/proxy?url=${encodeURIComponent(videoUrl)}`;
-        }
-
         // 更新进度
         updateParserProgress(100, '加载完成');
 
-        // 通知房间更换视频
-        socket.emit('change-video', {
-            url: videoUrl,
-            title: data.data.title
-        });
+        // 处理 MSE 模式（分离音视频，如 YouTube）
+        if (data.data.type === 'mse') {
+            // MSE 模式需要代理音视频 URL
+            const proxyVideoUrl = data.data.needsProxy
+                ? `/api/parser/proxy?url=${encodeURIComponent(data.data.videoUrl)}`
+                : data.data.videoUrl;
+            const proxyAudioUrl = data.data.needsProxy
+                ? `/api/parser/proxy?url=${encodeURIComponent(data.data.audioUrl)}`
+                : data.data.audioUrl;
+
+            // 通知房间使用 MSE 模式更换视频
+            socket.emit('change-video', {
+                url: proxyVideoUrl,
+                title: data.data.title,
+                mseData: {
+                    videoUrl: proxyVideoUrl,
+                    audioUrl: proxyAudioUrl
+                }
+            });
+        } else {
+            // 获取视频 URL
+            let videoUrl = data.data.url;
+
+            // 如果需要代理（防盗链）
+            if (data.data.needsProxy && data.data.type === 'direct') {
+                videoUrl = `/api/parser/proxy?url=${encodeURIComponent(videoUrl)}`;
+            }
+
+            // 通知房间更换视频
+            socket.emit('change-video', {
+                url: videoUrl,
+                title: data.data.title
+            });
+        }
 
         // 清空输入框
         document.getElementById('parser-url-input').value = '';
@@ -3011,14 +3032,14 @@ function updateParserProgress(percent, message) {
     const bar = document.getElementById('parser-progress-bar');
     const text = document.getElementById('parser-progress-text');
     const percentText = document.getElementById('parser-progress-percent');
-    
+
     if (bar) {
         bar.style.width = `${percent}%`;
         // Error state handling
         if (message && (message.includes('失败') || message.includes('错误') || message.includes('Error'))) {
-             bar.parentElement.parentElement.classList.add('error');
+            bar.parentElement.parentElement.classList.add('error');
         } else {
-             bar.parentElement.parentElement.classList.remove('error');
+            bar.parentElement.parentElement.classList.remove('error');
         }
     }
     if (text) text.textContent = message;

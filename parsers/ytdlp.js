@@ -374,6 +374,19 @@ async function extract(url, options = {}) {
           message: '解析完成'
         });
 
+        // 如果有分离的音频 URL（如 YouTube），使用 MSE 模式
+        if (extracted.audioUrl) {
+          return {
+            type: 'mse',
+            videoUrl: videoUrl,
+            audioUrl: extracted.audioUrl,
+            title: info.title,
+            duration: info.duration,
+            thumbnail: info.thumbnail,
+            needsProxy: true  // YouTube 等需要代理
+          };
+        }
+
         return {
           type: 'direct',
           url: videoUrl,
