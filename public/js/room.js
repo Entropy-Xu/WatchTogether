@@ -2471,7 +2471,401 @@ const originalStartRoom = startRoom;
 startRoom = function () {
     originalStartRoom();
     initBilibiliFeatures();
+    initVideoParser();  // 初始化通用视频解析
 };
+
+// ==========================================
+// 通用视频解析功能 (yt-dlp)
+// ==========================================
+
+let pendingParseResult = null;  // 待加载的解析结果
+let parserSupportedSites = [];  // 支持的网站列表
+
+/**
+ * 初始化视频解析功能
+ */
+function initVideoParser() {
+    const parseBtn = document.getElementById('parse-video-btn');
+    const urlInput = document.getElementById('parser-url-input');
+    const helpBtn = document.getElementById('parser-help-btn');
+    const rulesBtn = document.getElementById('parser-rules-btn');
+
+    // 解析按钮点击
+    parseBtn?.addEventListener('click', parseVideoUrl);
+
+    // 回车触发解析
+    urlInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') parseVideoUrl();
+    });
+
+    // 帮助按钮 - 显示支持的网站
+    helpBtn?.addEventListener('click', showSupportedSites);
+
+    // 规则管理按钮
+    rulesBtn?.addEventListener('click', showRulesModal);
+
+    // 预览弹窗事件
+    document.getElementById('parser-modal-close')?.addEventListener('click', hideParserModal);
+    document.getElementById('parser-cancel-btn')?.addEventListener('click', hideParserModal);
+    document.getElementById('parser-confirm-btn')?.addEventListener('click', confirmLoadParsedVideo);
+
+    // 支持网站弹窗事件
+    document.getElementById('parser-sites-close')?.addEventListener('click', hideParserSitesModal);
+    document.getElementById('parser-sites-ok-btn')?.addEventListener('click', hideParserSitesModal);
+
+    // 规则管理弹窗事件
+    initRulesModal();
+
+    // 监听解析进度
+    socket.on('parser-progress', handleParserProgress);
+
+    // 预加载支持的网站列表
+    loadSupportedSites();
+}
+
+/**
+ * 加载支持的网站列表
+ */
+async function loadSupportedSites() {
+    try {
+        const res = await fetch('/api/parser/status');
+        const data = await res.json();
+        if (data.success) {
+            parserSupportedSites = data.supportedSites || [];
+            // 检查 yt-dlp 状态
+            if (!data.parsers.ytdlp) {
+                console.warn('[视频解析] yt-dlp 未安装');
+            } else {
+                console.log('[视频解析] yt-dlp 版本:', data.parsers.ytdlpVersion);
+            }
+        }
+    } catch (err) {
+        console.error('[视频解析] 获取支持列表失败:', err);
+    }
+}
+
+/**
+ * 解析视频 URL
+ */
+async function parseVideoUrl() {
+    const urlInput = document.getElementById('parser-url-input');
+    const url = urlInput?.value.trim();
+
+    if (!url) {
+        showToast('请输入视频网页链接', 'error');
+        return;
+    }
+
+    // 检查是否是 B 站链接
+    if (url.includes('bilibili.com') || url.includes('b23.tv')) {
+        // 自动填充到 B 站输入框
+        document.getElementById('bilibili-url-input').value = url;
+        document.getElementById('parse-bilibili-btn').click();
+        urlInput.value = '';
+        return;
+    }
+
+    // 显示进度
+    showParserProgress(true);
+    updateParserProgress(5, '正在分析网页...');
+
+    // 禁用按钮
+    const parseBtn = document.getElementById('parse-video-btn');
+    if (parseBtn) {
+        parseBtn.disabled = true;
+        parseBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 解析中';
+    }
+
+    try {
+        // 获取视频信息
+        const infoRes = await fetch('/api/parser/info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+
+        const infoData = await infoRes.json();
+
+        if (!infoData.success) {
+            if (infoData.redirect === 'bilibili') {
+                // B站链接，重定向
+                document.getElementById('bilibili-url-input').value = url;
+                document.getElementById('parse-bilibili-btn').click();
+                urlInput.value = '';
+                showParserProgress(false);
+                return;
+            }
+            throw new Error(infoData.error || '获取视频信息失败');
+        }
+
+        updateParserProgress(30, `找到: ${infoData.data.title?.slice(0, 30) || '未知'}...`);
+
+        // 显示预览弹窗
+        showParserPreview(infoData.data, url);
+
+    } catch (err) {
+        showToast(err.message || '解析失败', 'error');
+        showParserProgress(false);
+    } finally {
+        // 恢复按钮
+        if (parseBtn) {
+            parseBtn.disabled = false;
+            parseBtn.innerHTML = '<span>解析视频</span>';
+        }
+    }
+}
+
+/**
+ * 显示解析预览弹窗
+ */
+function showParserPreview(info, url) {
+    pendingParseResult = { info, url };
+
+    const modal = document.getElementById('parser-preview-modal');
+    const thumbnail = document.getElementById('parser-thumbnail');
+    const title = document.getElementById('parser-title');
+    const duration = document.getElementById('parser-duration');
+    const uploader = document.getElementById('parser-uploader');
+    const site = document.getElementById('parser-site');
+    const qualitySelector = document.getElementById('parser-quality-selector');
+    const qualitySelect = document.getElementById('parser-quality-select');
+
+    // 填充信息
+    if (info.thumbnail) {
+        thumbnail.src = info.thumbnail;
+        thumbnail.style.display = 'block';
+    } else {
+        thumbnail.style.display = 'none';
+    }
+
+    title.textContent = info.title || '未知标题';
+    duration.querySelector('span').textContent = info.duration ? formatDurationSeconds(info.duration) : '未知';
+    uploader.querySelector('span').textContent = info.uploader || '未知';
+    site.querySelector('span').textContent = info.extractor || info.extractor_key || '未知';
+
+    // 画质选择 - 如果是通用解析器返回的直接 URL，隐藏画质选择
+    if (info.directUrl) {
+        qualitySelector.style.display = 'none';
+    } else {
+        // 画质选择
+        const videoFormats = (info.formats || []).filter(f =>
+            f.hasVideo && f.resolution && f.ext
+        );
+
+        if (videoFormats.length > 1) {
+            qualitySelector.style.display = 'block';
+            qualitySelect.innerHTML = '<option value="best">自动 (最佳画质)</option>';
+
+            // 按分辨率排序并去重
+            const seen = new Set();
+            videoFormats
+                .sort((a, b) => (b.height || 0) - (a.height || 0))
+                .forEach(f => {
+                    const key = f.resolution;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        const size = f.filesize ? ` (${formatFileSize(f.filesize)})` : '';
+                        qualitySelect.innerHTML += `<option value="${f.formatId}">${f.resolution} ${f.ext}${size}</option>`;
+                    }
+                });
+        } else {
+            qualitySelector.style.display = 'none';
+        }
+    }
+
+    showParserProgress(false);
+    modal.classList.add('show');
+}
+
+/**
+ * 确认加载解析的视频
+ */
+async function confirmLoadParsedVideo() {
+    if (!pendingParseResult) return;
+
+    const { info, url } = pendingParseResult;
+    const quality = document.getElementById('parser-quality-select')?.value || 'best';
+
+    hideParserModal();
+
+    // 如果是通用解析器已经返回了直接 URL，直接使用
+    if (info.directUrl) {
+        const videoUrl = info.directUrl;
+        
+        // 通知房间更换视频
+        socket.emit('change-video', {
+            url: videoUrl,
+            title: info.title
+        });
+
+        // 清空输入框
+        document.getElementById('parser-url-input').value = '';
+        showToast('视频加载成功', 'success');
+        return;
+    }
+
+    showParserProgress(true);
+    updateParserProgress(35, '正在获取视频源...');
+
+    // 禁用按钮
+    const parseBtn = document.getElementById('parse-video-btn');
+    if (parseBtn) {
+        parseBtn.disabled = true;
+        parseBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 加载中';
+    }
+
+    try {
+        const res = await fetch('/api/parser/parse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url,
+                roomId,
+                quality: quality === 'best' ? 'best[ext=mp4]/best' : quality,
+                forceDownload: false
+            })
+        });
+
+        const data = await res.json();
+
+        if (!data.success) {
+            throw new Error(data.error);
+        }
+
+        // 获取视频 URL
+        let videoUrl = data.data.url;
+
+        // 如果需要代理（防盗链）
+        if (data.data.needsProxy && data.data.type === 'direct') {
+            videoUrl = `/api/parser/proxy?url=${encodeURIComponent(videoUrl)}`;
+        }
+
+        // 更新进度
+        updateParserProgress(100, '加载完成');
+
+        // 通知房间更换视频
+        socket.emit('change-video', {
+            url: videoUrl,
+            title: data.data.title
+        });
+
+        // 清空输入框
+        document.getElementById('parser-url-input').value = '';
+        showToast('视频加载成功', 'success');
+
+        // 延迟隐藏进度条
+        setTimeout(() => showParserProgress(false), 500);
+
+    } catch (err) {
+        showToast(err.message || '加载视频失败', 'error');
+        showParserProgress(false);
+    } finally {
+        // 恢复按钮
+        if (parseBtn) {
+            parseBtn.disabled = false;
+            parseBtn.innerHTML = '<span>解析视频</span>';
+        }
+    }
+}
+
+/**
+ * 处理解析进度
+ */
+function handleParserProgress(data) {
+    updateParserProgress(data.progress, data.message);
+
+    if (data.stage === 'complete') {
+        setTimeout(() => showParserProgress(false), 1000);
+    } else if (data.stage === 'error') {
+        showToast(data.message, 'error');
+        showParserProgress(false);
+    }
+}
+
+/**
+ * 显示/隐藏解析进度条
+ */
+function showParserProgress(show) {
+    const container = document.getElementById('parser-progress-container');
+    if (container) container.style.display = show ? 'flex' : 'none';
+}
+
+/**
+ * 更新解析进度
+ */
+function updateParserProgress(percent, message) {
+    const bar = document.getElementById('parser-progress-bar');
+    const text = document.getElementById('parser-progress-text');
+    if (bar) bar.style.width = `${percent}%`;
+    if (text) text.textContent = message;
+}
+
+/**
+ * 隐藏预览弹窗
+ */
+function hideParserModal() {
+    document.getElementById('parser-preview-modal')?.classList.remove('show');
+    pendingParseResult = null;
+}
+
+/**
+ * 显示支持的网站列表
+ */
+async function showSupportedSites() {
+    const modal = document.getElementById('parser-sites-modal');
+    const grid = document.getElementById('parser-sites-grid');
+
+    // 如果还没有加载，先加载
+    if (parserSupportedSites.length === 0) {
+        await loadSupportedSites();
+    }
+
+    // 填充网站列表
+    grid.innerHTML = parserSupportedSites.map(site => `
+        <div class="parser-site-item">
+            <i class="${site.icon || 'fas fa-play-circle'}"></i>
+            <span>${site.name}</span>
+        </div>
+    `).join('');
+
+    modal.classList.add('show');
+}
+
+/**
+ * 隐藏支持网站弹窗
+ */
+function hideParserSitesModal() {
+    document.getElementById('parser-sites-modal')?.classList.remove('show');
+}
+
+/**
+ * 格式化秒数为时长字符串
+ */
+function formatDurationSeconds(seconds) {
+    if (!seconds || seconds <= 0) return '未知';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * 格式化文件大小
+ */
+function formatFileSize(bytes) {
+    if (!bytes) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let unitIndex = 0;
+    let size = bytes;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
+}
 
 // ==========================================
 // 屏幕共享功能
@@ -3445,3 +3839,344 @@ initSocket = function () {
         }
     }, 100);
 };
+
+// ==========================================
+// 解析规则管理
+// ==========================================
+
+let loadedRules = [];  // 已加载的规则
+
+/**
+ * 初始化规则管理弹窗
+ */
+function initRulesModal() {
+    // 关闭按钮
+    document.getElementById('rules-modal-close')?.addEventListener('click', hideRulesModal);
+    document.getElementById('rules-modal-ok-btn')?.addEventListener('click', hideRulesModal);
+
+    // 标签页切换
+    document.querySelectorAll('.rules-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.dataset.tab;
+            switchRulesTab(targetTab);
+        });
+    });
+
+    // 重新加载规则
+    document.getElementById('reload-rules-btn')?.addEventListener('click', reloadRules);
+
+    // 添加规则
+    document.getElementById('add-rule-btn')?.addEventListener('click', addRule);
+
+    // 测试规则
+    document.getElementById('test-rule-btn')?.addEventListener('click', testRule);
+}
+
+/**
+ * 显示规则管理弹窗
+ */
+function showRulesModal() {
+    const modal = document.getElementById('parser-rules-modal');
+    if (modal) {
+        modal.classList.add('show');
+        loadRulesList();
+    }
+}
+
+/**
+ * 隐藏规则管理弹窗
+ */
+function hideRulesModal() {
+    const modal = document.getElementById('parser-rules-modal');
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+/**
+ * 切换标签页
+ */
+function switchRulesTab(tabName) {
+    // 更新标签按钮状态
+    document.querySelectorAll('.rules-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+
+    // 更新内容显示
+    document.querySelectorAll('.rules-tab-content').forEach(content => {
+        content.classList.toggle('active', content.id === `rules-tab-${tabName}`);
+    });
+}
+
+/**
+ * 加载规则列表
+ */
+async function loadRulesList() {
+    const listEl = document.getElementById('rules-list');
+    const countEl = document.getElementById('rules-count');
+
+    if (!listEl) return;
+
+    listEl.innerHTML = '<div class="rules-loading"><i class="fa-solid fa-spinner fa-spin"></i> 加载中...</div>';
+
+    try {
+        const res = await fetch('/api/parser/rules');
+        const data = await res.json();
+
+        if (!data.success) {
+            throw new Error(data.error || '加载失败');
+        }
+
+        loadedRules = data.rules || [];
+        countEl.textContent = `已加载 ${loadedRules.length} 条规则`;
+
+        if (loadedRules.length === 0) {
+            listEl.innerHTML = `
+                <div class="rules-empty">
+                    <i class="fa-solid fa-puzzle-piece"></i>
+                    <p>暂无解析规则</p>
+                    <p>点击"添加规则"开始创建</p>
+                </div>
+            `;
+            return;
+        }
+
+        listEl.innerHTML = loadedRules.map(rule => `
+            <div class="rule-item" data-file="${rule.file}">
+                <div class="rule-item-info">
+                    <div class="rule-item-header">
+                        <span class="rule-item-name">${escapeHtml(rule.name)}</span>
+                        <span class="rule-item-badge ${rule.source}">${rule.source === 'system' ? '系统' : '用户'}</span>
+                        <span class="rule-item-badge priority">优先级 ${rule.priority}</span>
+                        <span class="rule-item-version">v${rule.version}</span>
+                    </div>
+                    <div class="rule-item-desc">${escapeHtml(rule.description || '无描述')}</div>
+                    <div class="rule-item-meta">
+                        <span><i class="fa-solid fa-globe"></i> ${rule.domains.slice(0, 3).join(', ')}${rule.domains.length > 3 ? '...' : ''}</span>
+                        ${rule.author ? `<span><i class="fa-solid fa-user"></i> ${escapeHtml(rule.author)}</span>` : ''}
+                    </div>
+                </div>
+                <div class="rule-item-actions">
+                    ${rule.source === 'user' ? `
+                        <button class="rule-action-btn delete" onclick="deleteRule('${rule.file}')" title="删除规则">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        listEl.innerHTML = `
+            <div class="rules-empty">
+                <i class="fa-solid fa-exclamation-triangle"></i>
+                <p>加载失败: ${escapeHtml(err.message)}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * 重新加载规则
+ */
+async function reloadRules() {
+    const btn = document.getElementById('reload-rules-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 加载中';
+    }
+
+    try {
+        const res = await fetch('/api/parser/rules/reload', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success) {
+            showToast(`已重新加载 ${data.count} 条规则`, 'success');
+            loadRulesList();
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (err) {
+        showToast('重新加载失败: ' + err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> 重新加载';
+        }
+    }
+}
+
+/**
+ * 添加规则
+ */
+async function addRule() {
+    const filenameInput = document.getElementById('rule-filename');
+    const jsonInput = document.getElementById('rule-json');
+    const btn = document.getElementById('add-rule-btn');
+
+    const filename = filenameInput?.value.trim();
+    const jsonStr = jsonInput?.value.trim();
+
+    if (!jsonStr) {
+        showToast('请输入规则 JSON', 'error');
+        return;
+    }
+
+    // 解析 JSON
+    let rule;
+    try {
+        rule = JSON.parse(jsonStr);
+    } catch (err) {
+        showToast('JSON 格式错误: ' + err.message, 'error');
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 添加中';
+    }
+
+    try {
+        const res = await fetch('/api/parser/rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rule, filename: filename || undefined })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+            showToast('规则添加成功', 'success');
+            filenameInput.value = '';
+            jsonInput.value = '';
+            switchRulesTab('list');
+            loadRulesList();
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (err) {
+        showToast('添加失败: ' + err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-plus"></i> 添加规则';
+        }
+    }
+}
+
+/**
+ * 删除规则
+ */
+async function deleteRule(filename) {
+    if (!confirm(`确定要删除规则 "${filename}" 吗？`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/parser/rules/${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+            showToast('规则已删除', 'success');
+            loadRulesList();
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (err) {
+        showToast('删除失败: ' + err.message, 'error');
+    }
+}
+
+/**
+ * 测试规则
+ */
+async function testRule() {
+    const urlInput = document.getElementById('test-url');
+    const jsonInput = document.getElementById('test-rule-json');
+    const resultEl = document.getElementById('test-result');
+    const resultContent = document.getElementById('test-result-content');
+    const btn = document.getElementById('test-rule-btn');
+
+    const testUrl = urlInput?.value.trim();
+    const jsonStr = jsonInput?.value.trim();
+
+    if (!testUrl) {
+        showToast('请输入测试 URL', 'error');
+        return;
+    }
+
+    // 如果提供了 JSON，解析它
+    let rule = null;
+    if (jsonStr) {
+        try {
+            rule = JSON.parse(jsonStr);
+        } catch (err) {
+            showToast('规则 JSON 格式错误: ' + err.message, 'error');
+            return;
+        }
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 测试中';
+    }
+
+    resultEl.style.display = 'none';
+
+    try {
+        let res, data;
+
+        if (rule) {
+            // 测试自定义规则
+            res = await fetch('/api/parser/rules/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rule, testUrl })
+            });
+            data = await res.json();
+        } else {
+            // 使用已有规则解析
+            res = await fetch('/api/parser/info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: testUrl })
+            });
+            data = await res.json();
+        }
+
+        resultEl.style.display = 'block';
+
+        if (data.success) {
+            resultEl.classList.remove('error');
+            resultEl.querySelector('h4').innerHTML = '<i class="fa-solid fa-check-circle"></i> 测试成功';
+            resultContent.textContent = JSON.stringify(data.result || data.data, null, 2);
+        } else {
+            resultEl.classList.add('error');
+            resultEl.querySelector('h4').innerHTML = '<i class="fa-solid fa-exclamation-circle"></i> 测试失败';
+            resultContent.textContent = data.error || '未能提取到视频地址';
+        }
+    } catch (err) {
+        resultEl.style.display = 'block';
+        resultEl.classList.add('error');
+        resultEl.querySelector('h4').innerHTML = '<i class="fa-solid fa-exclamation-circle"></i> 测试失败';
+        resultContent.textContent = err.message;
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-play"></i> 测试解析';
+        }
+    }
+}
+
+/**
+ * HTML 转义
+ */
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}

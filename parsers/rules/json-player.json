@@ -1,0 +1,65 @@
+{
+  "name": "JSON播放器配置",
+  "version": "1.0.0",
+  "author": "System",
+  "description": "提取页面中 JSON 格式的播放器配置",
+  "enabled": true,
+  "priority": 5,
+  
+  "match": {
+    "domains": ["*"],
+    "pathPattern": "/(play|video|watch)/.*"
+  },
+  
+  "extract": [
+    {
+      "name": "player_config",
+      "type": "regex",
+      "target": "html",
+      "pattern": "var\\s+player_config\\s*=\\s*(\\{[\\s\\S]*?\\});",
+      "group": 1,
+      "fields": {
+        "url": "url",
+        "title": "title"
+      }
+    },
+    {
+      "name": "json_url_field",
+      "type": "regex",
+      "target": "html",
+      "pattern": "\"url\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\"",
+      "group": 1
+    },
+    {
+      "name": "json_video_field",
+      "type": "regex",
+      "target": "html",
+      "pattern": "\"video\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\"",
+      "group": 1
+    },
+    {
+      "name": "json_src_field",
+      "type": "regex",
+      "target": "html",
+      "pattern": "\"src\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\"",
+      "group": 1
+    }
+  ],
+  
+  "decode": [
+    {
+      "type": "custom",
+      "pattern": "\\\\",
+      "replacement": ""
+    }
+  ],
+  
+  "validate": {
+    "pattern": "^https?://.*\\.(m3u8|mp4)"
+  },
+  
+  "output": {
+    "type": "auto",
+    "referer": "{origin}"
+  }
+}

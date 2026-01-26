@@ -105,6 +105,30 @@
               <span id="bilibili-login-text">登录B站</span>
             </button>
           </div>
+
+          <!-- 通用视频解析 -->
+          <div class="parser-input-wrapper">
+            <i class="fa-solid fa-globe parser-icon"></i>
+            <input type="text" id="parser-url-input" placeholder="粘贴网页视频链接 (支持 YouTube、Twitter、微博、抖音等 1000+ 网站)" autocomplete="off">
+            <button id="parse-video-btn" class="load-btn parser-btn">
+              <span>解析视频</span>
+            </button>
+            <button id="parser-help-btn" class="upload-btn parser-help-btn" type="button" title="查看支持的网站">
+              <i class="fa-solid fa-circle-question"></i>
+            </button>
+            <button id="parser-rules-btn" class="upload-btn parser-rules-btn" type="button" title="管理解析规则">
+              <i class="fa-solid fa-puzzle-piece"></i>
+            </button>
+          </div>
+
+          <!-- 解析进度条 -->
+          <div class="parser-progress" id="parser-progress-container" style="display: none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="parser-progress-bar"></div>
+            </div>
+            <span class="progress-text" id="parser-progress-text">解析中...</span>
+          </div>
+
           <!-- 上传进度条 -->
           <div class="upload-progress" id="upload-progress" style="display: none;">
             <div class="progress-bar">
@@ -540,6 +564,177 @@
         <button id="screen-share-start-btn" class="btn btn-primary">
           <i class="fa-solid fa-display"></i> 开始共享
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 视频解析预览弹窗 -->
+  <div id="parser-preview-modal" class="modal-overlay">
+    <div class="modal-content parser-modal">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-video"></i> 视频预览</h3>
+        <button class="modal-close-btn" id="parser-modal-close" title="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="parser-preview">
+          <img id="parser-thumbnail" class="parser-thumbnail" src="" alt="视频封面">
+          <div class="parser-info">
+            <h4 id="parser-title" class="parser-title">视频标题</h4>
+            <p id="parser-duration" class="parser-meta"><i class="fa-solid fa-clock"></i> <span>--:--</span></p>
+            <p id="parser-uploader" class="parser-meta"><i class="fa-solid fa-user"></i> <span>--</span></p>
+            <p id="parser-site" class="parser-meta"><i class="fa-solid fa-globe"></i> <span>--</span></p>
+          </div>
+        </div>
+        <div class="parser-quality-selector" id="parser-quality-selector" style="display: none;">
+          <label><i class="fa-solid fa-sliders"></i> 选择画质</label>
+          <select id="parser-quality-select">
+            <option value="best">自动 (最佳)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="parser-cancel-btn" class="btn btn-secondary">取消</button>
+        <button id="parser-confirm-btn" class="btn btn-primary">
+          <i class="fa-solid fa-play"></i> 加载视频
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 支持网站列表弹窗 -->
+  <div id="parser-sites-modal" class="modal-overlay">
+    <div class="modal-content parser-sites-modal">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-globe"></i> 支持的网站</h3>
+        <button class="modal-close-btn" id="parser-sites-close" title="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="parser-sites-hint">支持以下网站及 yt-dlp 支持的 1000+ 其他网站：</p>
+        <div class="parser-sites-grid" id="parser-sites-grid">
+          <!-- 动态填充 -->
+        </div>
+        <div class="parser-sites-note">
+          <i class="fa-solid fa-info-circle"></i>
+          <span>B站视频请使用上方的专用解析按钮以获得更好体验</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="parser-sites-ok-btn" class="btn btn-primary">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 解析规则管理弹窗 -->
+  <div id="parser-rules-modal" class="modal-overlay">
+    <div class="modal-content parser-rules-modal">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-puzzle-piece"></i> 解析规则管理</h3>
+        <button class="modal-close-btn" id="rules-modal-close" title="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- 标签页切换 -->
+        <div class="rules-tabs">
+          <button class="rules-tab active" data-tab="list">
+            <i class="fa-solid fa-list"></i> 规则列表
+          </button>
+          <button class="rules-tab" data-tab="add">
+            <i class="fa-solid fa-plus"></i> 添加规则
+          </button>
+          <button class="rules-tab" data-tab="test">
+            <i class="fa-solid fa-flask"></i> 测试规则
+          </button>
+        </div>
+
+        <!-- 规则列表标签页 -->
+        <div class="rules-tab-content active" id="rules-tab-list">
+          <div class="rules-toolbar">
+            <button id="reload-rules-btn" class="btn btn-sm btn-secondary">
+              <i class="fa-solid fa-rotate"></i> 重新加载
+            </button>
+            <span class="rules-count" id="rules-count">已加载 0 条规则</span>
+          </div>
+          <div class="rules-list" id="rules-list">
+            <!-- 动态填充 -->
+            <div class="rules-loading">
+              <i class="fa-solid fa-spinner fa-spin"></i> 加载中...
+            </div>
+          </div>
+        </div>
+
+        <!-- 添加规则标签页 -->
+        <div class="rules-tab-content" id="rules-tab-add">
+          <div class="rules-form">
+            <div class="form-group">
+              <label for="rule-filename">文件名 (可选)</label>
+              <input type="text" id="rule-filename" placeholder="my-rule.json" class="form-input">
+            </div>
+            <div class="form-group">
+              <label for="rule-json">
+                规则 JSON
+                <a href="/parsers/rules/RULES_GUIDE.md" target="_blank" class="help-link">
+                  <i class="fa-solid fa-circle-question"></i> 查看编写指南
+                </a>
+              </label>
+              <textarea id="rule-json" class="form-textarea" rows="15" placeholder='{
+  "name": "我的规则",
+  "version": "1.0.0",
+  "author": "作者",
+  "description": "规则描述",
+  "priority": 10,
+  "match": {
+    "domains": ["example.com"]
+  },
+  "extract": [
+    {
+      "type": "regex",
+      "pattern": "(https?://[^\"]+\\.m3u8[^\"]*)",
+      "group": 1
+    }
+  ],
+  "output": {
+    "type": "auto"
+  }
+}'></textarea>
+            </div>
+            <div class="form-actions">
+              <button id="add-rule-btn" class="btn btn-primary">
+                <i class="fa-solid fa-plus"></i> 添加规则
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 测试规则标签页 -->
+        <div class="rules-tab-content" id="rules-tab-test">
+          <div class="rules-form">
+            <div class="form-group">
+              <label for="test-url">测试 URL</label>
+              <input type="url" id="test-url" placeholder="https://example.com/video/123.html" class="form-input">
+            </div>
+            <div class="form-group">
+              <label for="test-rule-json">规则 JSON (留空则使用已加载的规则)</label>
+              <textarea id="test-rule-json" class="form-textarea" rows="10" placeholder="留空测试已有规则，或粘贴自定义规则 JSON"></textarea>
+            </div>
+            <div class="form-actions">
+              <button id="test-rule-btn" class="btn btn-primary">
+                <i class="fa-solid fa-play"></i> 测试解析
+              </button>
+            </div>
+            <div class="test-result" id="test-result" style="display: none;">
+              <h4><i class="fa-solid fa-check-circle"></i> 测试结果</h4>
+              <pre id="test-result-content"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="rules-modal-ok-btn" class="btn btn-secondary">关闭</button>
       </div>
     </div>
   </div>

@@ -1,0 +1,38 @@
+{
+  "name": "直接链接提取",
+  "version": "1.0.0",
+  "author": "System",
+  "description": "从页面中直接提取 m3u8/mp4 链接（优先级最低的兜底规则）",
+  "enabled": true,
+  "priority": 1,
+  
+  "match": {
+    "domains": ["*"]
+  },
+  
+  "extract": [
+    {
+      "name": "m3u8_link",
+      "type": "regex",
+      "target": "html",
+      "pattern": "[\"']?(https?://[^\"'\\s]+\\.m3u8[^\"'\\s]*)[\"']?",
+      "group": 1
+    },
+    {
+      "name": "mp4_link",
+      "type": "regex",
+      "target": "html",
+      "pattern": "[\"']?(https?://[^\"'\\s]+\\.mp4[^\"'\\s]*)[\"']?",
+      "group": 1
+    }
+  ],
+  
+  "validate": {
+    "pattern": "^https?://(?!.*(?:example\\.com|placeholder|analytics))"
+  },
+  
+  "output": {
+    "type": "auto",
+    "referer": "{origin}"
+  }
+}

@@ -498,6 +498,291 @@ function broadcastRoomUpdate() {
   });
 }
 
+// ============ 通用视频解析 API ============
+const videoParser = require('./parsers');
+const https = require('https');
+
+// 检查解析器状态
+app.get('/api/parser/status', async (req, res) => {
+  try {
+    const ytdlpStatus = await videoParser.checkYtdlpAvailable();
+    res.json({
+      success: true,
+      parsers: {
+        ytdlp: ytdlpStatus.available,
+        ytdlpVersion: ytdlpStatus.version || null,
+        bilibili: true
+      },
+      supportedSites: videoParser.SUPPORTED_SITES
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 获取视频信息（预览）
+app.post('/api/parser/info', async (req, res) => {
+  const { url } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ success: false, error: '缺少 URL' });
+  }
+
+  // 检查是否是 B站
+  if (url.includes('bilibili.com') || url.includes('b23.tv')) {
+    return res.json({
+      success: false,
+      redirect: 'bilibili',
+      error: 'B站视频请使用专用解析按钮'
+    });
+  }
+
+  try {
+    const info = await videoParser.getVideoInfo(url);
+    res.json({ success: true, data: info });
+  } catch (err) {
+    console.error('[视频解析] 获取信息失败:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 解析视频（获取播放地址或下载）
+app.post('/api/parser/parse', async (req, res) => {
+  const { url, roomId, quality, forceDownload } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ success: false, error: '缺少 URL' });
+  }
+
+  // 检测是否是 B站（使用专用解析器）
+  const parser = videoParser.detectParser(url);
+  if (parser === 'bilibili') {
+    return res.json({
+      success: false,
+      redirect: 'bilibili',
+      error: 'B站视频请使用专用解析按钮'
+    });
+  }
+
+  try {
+    const result = await videoParser.parseVideo(url, {
+      roomId,
+      quality,
+      forceDownload,
+      outputDir: uploadsDir,
+      onProgress: (progress) => {
+        // 通过 Socket.IO 推送进度
+        if (roomId) {
+          io.in(roomId).emit('parser-progress', {
+            url,
+            ...progress
+          });
+        }
+      }
+    });
+
+    // 如果是下载到本地的视频，记录到房间（用于清理）
+    if (result.type === 'local' && roomId && result.filename) {
+      const room = rooms.get(roomId);
+      if (room) {
+        if (!room.parserFiles) room.parserFiles = [];
+        room.parserFiles.push(result.filename);
+      }
+    }
+
+    res.json({ success: true, data: result });
+
+  } catch (err) {
+    console.error('[视频解析] 失败:', err.message);
+
+    if (roomId) {
+      io.in(roomId).emit('parser-progress', {
+        url,
+        stage: 'error',
+        progress: 0,
+        message: err.message
+      });
+    }
+
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 视频流代理（处理防盗链）
+app.get('/api/parser/proxy', async (req, res) => {
+  const { url, referer } = req.query;
+
+  if (!url) {
+    return res.status(400).json({ error: '缺少视频 URL' });
+  }
+
+  try {
+    const urlObj = new URL(url);
+    const protocol = urlObj.protocol === 'https:' ? https : http;
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer': referer || urlObj.origin,
+      'Origin': urlObj.origin
+    };
+
+    // 转发 Range 请求
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    const proxyReq = protocol.request({
+      hostname: urlObj.hostname,
+      port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers
+    }, (proxyRes) => {
+      res.status(proxyRes.statusCode);
+
+      // 转发响应头
+      ['content-type', 'content-length', 'content-range', 'accept-ranges']
+        .forEach(h => {
+          if (proxyRes.headers[h]) res.setHeader(h, proxyRes.headers[h]);
+        });
+
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error('[代理] 请求失败:', err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: '代理请求失败' });
+      }
+    });
+
+    proxyReq.end();
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 更新 yt-dlp
+app.post('/api/parser/update', async (req, res) => {
+  try {
+    const result = await videoParser.updateYtdlp();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============ 解析规则管理 API ============
+
+// 获取所有规则
+app.get('/api/parser/rules', (req, res) => {
+  try {
+    const rules = videoParser.getRulesInfo();
+    res.json({ success: true, rules });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 重新加载规则
+app.post('/api/parser/rules/reload', (req, res) => {
+  try {
+    const rules = videoParser.reloadRules();
+    res.json({ 
+      success: true, 
+      message: `已重新加载 ${rules.length} 条规则`,
+      count: rules.length
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 添加用户规则
+app.post('/api/parser/rules', (req, res) => {
+  try {
+    const { rule, filename } = req.body;
+    
+    if (!rule) {
+      return res.status(400).json({ success: false, error: '规则内容不能为空' });
+    }
+    
+    const result = videoParser.addUserRule(rule, filename);
+    res.json({ 
+      success: true, 
+      message: '规则添加成功',
+      file: result.file
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// 删除用户规则
+app.delete('/api/parser/rules/:filename', (req, res) => {
+  try {
+    const { filename } = req.params;
+    videoParser.removeUserRule(filename);
+    res.json({ success: true, message: '规则已删除' });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// 测试规则
+app.post('/api/parser/rules/test', async (req, res) => {
+  try {
+    const { rule, testUrl } = req.body;
+    
+    if (!rule || !testUrl) {
+      return res.status(400).json({ success: false, error: '规则和测试 URL 不能为空' });
+    }
+    
+    const result = await videoParser.testRule(rule, testUrl);
+    
+    if (result) {
+      res.json({ 
+        success: true, 
+        message: '规则测试成功',
+        result
+      });
+    } else {
+      res.json({ 
+        success: false, 
+        error: '规则未能提取到视频地址'
+      });
+    }
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// ============ 定时清理过期文件 ============
+// 每小时检查一次，删除超过 24 小时的解析下载文件
+setInterval(() => {
+  const maxAge = 24 * 60 * 60 * 1000; // 24 小时
+  const now = Date.now();
+
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    files.forEach(file => {
+      // 只清理 video_ 开头的文件（解析器下载的）
+      if (file.startsWith('video_')) {
+        const filePath = path.join(uploadsDir, file);
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtime.getTime() > maxAge) {
+          fs.unlinkSync(filePath);
+          console.log(`[清理] 删除过期文件: ${file}`);
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[清理] 错误:', err.message);
+  }
+}, 60 * 60 * 1000); // 每小时
+
 // ============ B 站相关 API ============
 const bilibili = require('./bilibili');
 

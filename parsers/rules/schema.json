@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "视频解析规则",
+  "description": "定义如何从网页中提取视频地址的规则",
+  "type": "object",
+  "required": ["name", "version", "match", "extract"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "规则名称"
+    },
+    "version": {
+      "type": "string",
+      "description": "规则版本，格式: x.y.z"
+    },
+    "author": {
+      "type": "string",
+      "description": "规则作者"
+    },
+    "description": {
+      "type": "string",
+      "description": "规则描述"
+    },
+    "homepage": {
+      "type": "string",
+      "description": "规则主页或文档链接"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否启用此规则"
+    },
+    "priority": {
+      "type": "integer",
+      "default": 0,
+      "description": "优先级，数值越大越优先匹配"
+    },
+    "match": {
+      "type": "object",
+      "description": "URL 匹配规则",
+      "required": ["domains"],
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "匹配的域名列表，支持通配符 *"
+        },
+        "pathPattern": {
+          "type": "string",
+          "description": "路径匹配正则表达式"
+        },
+        "urlPattern": {
+          "type": "string",
+          "description": "完整 URL 匹配正则表达式"
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "description": "请求配置",
+      "properties": {
+        "headers": {
+          "type": "object",
+          "description": "自定义请求头"
+        },
+        "timeout": {
+          "type": "integer",
+          "default": 15000,
+          "description": "请求超时时间（毫秒）"
+        },
+        "followRedirect": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否跟随重定向"
+        }
+      }
+    },
+    "extract": {
+      "type": "array",
+      "description": "提取规则列表，按顺序尝试",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "提取器名称（用于调试）"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["regex", "json", "jsonPath", "css", "xpath"],
+            "description": "提取类型"
+          },
+          "target": {
+            "type": "string",
+            "enum": ["html", "script", "json"],
+            "default": "html",
+            "description": "提取目标：html=整个页面, script=script标签内容, json=解析为JSON"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "提取模式（正则表达式、JSON路径、CSS选择器等）"
+          },
+          "group": {
+            "type": "integer",
+            "default": 1,
+            "description": "正则匹配组索引"
+          },
+          "attribute": {
+            "type": "string",
+            "description": "CSS/XPath 提取时获取的属性名"
+          },
+          "fields": {
+            "type": "object",
+            "description": "多字段提取",
+            "properties": {
+              "url": { "type": "string", "description": "视频地址字段" },
+              "title": { "type": "string", "description": "标题字段" },
+              "thumbnail": { "type": "string", "description": "封面字段" }
+            }
+          }
+        }
+      }
+    },
+    "decode": {
+      "type": "array",
+      "description": "URL 解码规则，按顺序应用",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["base64", "url", "hex", "unicode", "reverse", "custom"],
+            "description": "解码类型"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "自定义解码的替换正则"
+          },
+          "replacement": {
+            "type": "string",
+            "description": "自定义解码的替换字符串"
+          }
+        }
+      }
+    },
+    "validate": {
+      "type": "object",
+      "description": "URL 验证规则",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "URL 必须匹配的正则表达式"
+        },
+        "extensions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "允许的文件扩展名"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "description": "输出配置",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["hls", "dash", "mp4", "auto"],
+          "default": "auto",
+          "description": "视频类型"
+        },
+        "referer": {
+          "type": "string",
+          "description": "播放时使用的 Referer，支持变量 {origin}, {url}"
+        },
+        "headers": {
+          "type": "object",
+          "description": "播放时需要的请求头"
+        }
+      }
+    }
+  }
+}
