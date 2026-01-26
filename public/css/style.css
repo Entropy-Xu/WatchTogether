@@ -649,8 +649,15 @@ input::placeholder {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
 }
 
 .p2p-peers {
@@ -688,7 +695,8 @@ input::placeholder {
 }
 
 .video-url-bar {
-  padding: 0; /* Remove padding from container */
+  padding: 0;
+  /* Remove padding from container */
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -700,13 +708,13 @@ input::placeholder {
 .video-input-tabs {
   display: flex;
   padding: 0 1rem;
-  background: rgba(0,0,0,0.2);
+  background: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid var(--glass-border);
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
 .input-tab {
-  padding: 0.8rem 1rem;
+  padding: 0.6rem 0.8rem;
   color: var(--text-secondary);
   font-size: 0.9rem;
   font-weight: 500;
@@ -714,11 +722,13 @@ input::placeholder {
   transition: all var(--transition-fast);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
+  cursor: pointer;
 }
 
 .input-tab:hover {
   color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .input-tab.active {
@@ -728,7 +738,7 @@ input::placeholder {
 
 .input-tab-content {
   display: none;
-  padding: 0.8rem 1.5rem;
+  padding: 0.5rem 1rem;
   animation: fadeIn 0.3s ease;
 }
 
@@ -742,8 +752,15 @@ input::placeholder {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 调整 input wrapper 在 tab 内部的样式 */
@@ -762,7 +779,7 @@ input::placeholder {
 }
 
 .progress-bar-container {
-    padding: 0 1.5rem 0.8rem;
+  padding: 0 1.5rem 0.8rem;
 }
 
 /* Mobile Optimizations */
@@ -772,18 +789,18 @@ input::placeholder {
     gap: 0;
     justify-content: space-between;
   }
-  
+
   .input-tab {
     flex: 1;
     justify-content: center;
     padding: 0.8rem 0.5rem;
     font-size: 0.85rem;
   }
-  
+
   .input-tab-content {
     padding: 0.8rem;
   }
-  
+
   .url-input-wrapper,
   .bilibili-input-wrapper,
   .parser-input-wrapper {
@@ -791,19 +808,22 @@ input::placeholder {
     padding: 0.5rem;
     gap: 0.5rem;
   }
-  
+
   .url-input-wrapper input,
   .bilibili-input-wrapper input,
   .parser-input-wrapper input {
     width: 100%;
     min-width: 100%;
-    order: 1; /* Input on new line if needed, or first */
+    order: 1;
+    /* Input on new line if needed, or first */
     border-bottom: 1px solid var(--glass-border);
     padding-bottom: 0.5rem;
     margin-bottom: 0.2rem;
   }
-  
-  .load-btn, .upload-btn, .mobile-input-row {
+
+  .load-btn,
+  .upload-btn,
+  .mobile-input-row {
     flex: 1;
     justify-content: center;
     order: 2;
@@ -811,36 +831,38 @@ input::placeholder {
 
   /* Hide unnecessary text labels on mobile buttons if icon exists */
   .d-none-mobile {
-      display: none !important;
+    display: none !important;
   }
-  
+
   /* Optimize Control Bar for Mobile */
   .custom-controls {
-      padding: 0.2rem 0.5rem !important; /* Reduce padding */
-      flex-wrap: wrap;
+    padding: 0.2rem 0.5rem !important;
+    /* Reduce padding */
+    flex-wrap: wrap;
   }
-  
+
   .active-hidden-mobile {
-      display: none !important;
+    display: none !important;
   }
 
   /* Fix stacked time display */
   .time-display {
-      font-size: 0.75rem;
-      white-space: nowrap;
-      margin: 0 0.3rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    margin: 0 0.3rem;
   }
-  
+
   /* Fix huge send button by hiding inline input on mobile */
   .danmaku-input-area {
-      display: none; /* Hide inline input on mobile */
+    display: none;
+    /* Hide inline input on mobile */
   }
 
   /* Make sure controls fit */
   .control-btn {
-      width: 32px;
-      height: 32px;
-      padding: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
   }
 }
 
@@ -3184,15 +3206,41 @@ input::placeholder {
   text-align: center;
 }
 
-.parser-site-item i.fa-youtube { color: #ff0000; }
-.parser-site-item i.fa-twitter { color: #1da1f2; }
-.parser-site-item i.fa-weibo { color: #e6162d; }
-.parser-site-item i.fa-tiktok { color: #ff0050; }
-.parser-site-item i.fa-vimeo { color: #1ab7ea; }
-.parser-site-item i.fa-twitch { color: #9146ff; }
-.parser-site-item i.fa-facebook { color: #1877f2; }
-.parser-site-item i.fa-instagram { color: #e4405f; }
-.parser-site-item i.fa-reddit { color: #ff4500; }
+.parser-site-item i.fa-youtube {
+  color: #ff0000;
+}
+
+.parser-site-item i.fa-twitter {
+  color: #1da1f2;
+}
+
+.parser-site-item i.fa-weibo {
+  color: #e6162d;
+}
+
+.parser-site-item i.fa-tiktok {
+  color: #ff0050;
+}
+
+.parser-site-item i.fa-vimeo {
+  color: #1ab7ea;
+}
+
+.parser-site-item i.fa-twitch {
+  color: #9146ff;
+}
+
+.parser-site-item i.fa-facebook {
+  color: #1877f2;
+}
+
+.parser-site-item i.fa-instagram {
+  color: #e4405f;
+}
+
+.parser-site-item i.fa-reddit {
+  color: #ff4500;
+}
 
 .parser-sites-note {
   display: flex;
@@ -3540,7 +3588,8 @@ input::placeholder {
 }
 
 .test-result.error h4 i::before {
-  content: "\f06a"; /* fa-exclamation-circle */
+  content: "\f06a";
+  /* fa-exclamation-circle */
 }
 
 /* 空状态 */
