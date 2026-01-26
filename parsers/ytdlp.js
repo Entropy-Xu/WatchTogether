@@ -41,6 +41,10 @@ async function getInfo(url, options = {}) {
     '--no-download',
     '--no-warnings',
     '--no-playlist',  // 不处理播放列表
+    // 尝试绕过 YouTube 403 错误
+    '--extractor-args', 'youtube:player_client=android',
+    '--add-header', 'Referer:https://www.youtube.com/',
+    '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     url
   ];
 
@@ -174,6 +178,10 @@ async function extractUrl(url, options = {}) {
     '-g',  // 只获取 URL，不下载
     '--no-warnings',
     '--no-playlist',
+    // 尝试绕过 YouTube 403 错误
+    '--extractor-args', 'youtube:player_client=android',
+    '--add-header', 'Referer:https://www.youtube.com/',
+    '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     url
   ];
 
@@ -225,6 +233,10 @@ async function download(url, options = {}) {
     '--no-warnings',
     '--no-playlist',
     '--no-mtime',  // 不修改文件时间
+    // 尝试绕过 YouTube 403 错误
+    '--extractor-args', 'youtube:player_client=android',
+    '--add-header', 'Referer:https://www.youtube.com/',
+    '--user-agent', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     url
   ];
 
