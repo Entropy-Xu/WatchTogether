@@ -98,12 +98,13 @@
                   <span>播放</span>
                 </button>
               </div>
-              
+
               <div class="secondary-actions">
-                 <button id="upload-video-btn" class="icon-btn" type="button" title="上传视频">
+                <button id="upload-video-btn" class="icon-btn" type="button" title="上传视频">
                   <i class="fa-solid fa-file-upload"></i>
                 </button>
-                <input type="file" id="video-file-input" accept="video/*,.mkv,.avi,.flv,.wmv,.ts" style="display: none;">
+                <input type="file" id="video-file-input" accept="video/*,.mkv,.avi,.flv,.wmv,.ts"
+                  style="display: none;">
 
                 <button id="upload-subtitle-btn" class="icon-btn" type="button" title="上传字幕">
                   <i class="fa-solid fa-closed-captioning"></i>
@@ -154,8 +155,8 @@
           <!-- 公共进度条区域 -->
           <div class="parser-progress" id="parser-progress-container" style="display: none;">
             <div class="progress-info">
-               <span class="progress-text" id="parser-progress-text">解析中...</span>
-               <span class="progress-percent" id="parser-progress-percent">0%</span>
+              <span class="progress-text" id="parser-progress-text">解析中...</span>
+              <span class="progress-percent" id="parser-progress-percent">0%</span>
             </div>
             <div class="progress-bar">
               <div class="progress-fill" id="parser-progress-bar"></div>
@@ -199,7 +200,7 @@
           </video>
 
           <!-- Danmaku Layer -->
-          <div id="danmaku-layer" class="danmaku-layer"></div>
+          <div id="danmaku-container" class="danmaku-container"></div>
 
           <!-- Video Placeholder -->
           <div id="video-placeholder" class="video-placeholder">
@@ -751,7 +752,8 @@
             </div>
             <div class="form-group">
               <label for="test-rule-json">规则 JSON (留空则使用已加载的规则)</label>
-              <textarea id="test-rule-json" class="form-textarea" rows="10" placeholder="留空测试已有规则，或粘贴自定义规则 JSON"></textarea>
+              <textarea id="test-rule-json" class="form-textarea" rows="10"
+                placeholder="留空测试已有规则，或粘贴自定义规则 JSON"></textarea>
             </div>
             <div class="form-actions">
               <button id="test-rule-btn" class="btn btn-primary">

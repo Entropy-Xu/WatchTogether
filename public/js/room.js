@@ -1809,11 +1809,11 @@ class DanmakuManager {
 let danmakuManager;
 
 function initDanmakuSystem() {
-    danmakuManager = new DanmakuManager('danmaku-layer');
+    danmakuManager = new DanmakuManager('danmaku-container');
     const input = document.getElementById('danmaku-input');
     const sendBtn = document.getElementById('send-danmaku-btn');
     const toggleBtn = document.getElementById('danmaku-toggle-btn');
-    const layer = document.getElementById('danmaku-layer');
+    const layer = document.getElementById('danmaku-container');
 
     function send() {
         const text = input.value.trim();
