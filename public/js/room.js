@@ -25,6 +25,26 @@ let screenStream = null;           // 本地屏幕流
 let peerConnections = new Map();   // peerId -> RTCPeerConnection
 let isScreenSharing = false;       // 是否正在共享
 let currentSharer = null;          // 当前共享者信息 { id, name }
+let connectionRetryCount = 0;      // P2P 连接重试次数
+const MAX_RETRY_COUNT = 3;         // 最大重试次数
+
+// P2P 连接质量监控
+let statsInterval = null;          // 统计定时器
+let lastBytesReceived = 0;         // 上次收到的字节数
+let lastStatsTime = 0;             // 上次统计时间
+
+// 自适应码率配置
+const BITRATE_LEVELS = [
+    { bitrate: 500, label: '极低' },
+    { bitrate: 1000, label: '低' },
+    { bitrate: 2500, label: '中' },
+    { bitrate: 5000, label: '高' },
+    { bitrate: 8000, label: '超高' }
+];
+let currentBitrateLevel = 3;       // 当前码率级别索引 (默认高)
+let consecutiveGoodStats = 0;      // 连续良好统计次数
+let consecutiveBadStats = 0;       // 连续差统计次数
+
 const rtcConfig = {
     iceServers: [
         // 国内可访问的 STUN 服务器
@@ -35,7 +55,9 @@ const rtcConfig = {
         { urls: 'stun:stun.cloudflare.com:3478' },
         { urls: 'stun:stun.stunprotocol.org:3478' }
     ],
-    iceCandidatePoolSize: 10  // 预先收集 ICE 候选，加速连接
+    iceCandidatePoolSize: 10,       // 预先收集 ICE 候选，加速连接
+    bundlePolicy: 'max-bundle',     // 优化：合并媒体流
+    rtcpMuxPolicy: 'require'        // 优化：RTCP 复用
 };
 
 // ==========================================
@@ -2740,14 +2762,40 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
         console.log(`[屏幕共享] 与分享者连接状态: ${pc.connectionState}`);
 
         if (pc.connectionState === 'failed') {
-            showToast('P2P 连接失败，可能是网络限制，请尝试刷新页面', 'error');
-            showScreenShareContainer(false);
             peerConnections.delete(sharerId);
             pc.close();
+
+            // 自动重试
+            if (connectionRetryCount < MAX_RETRY_COUNT) {
+                connectionRetryCount++;
+                showToast(`P2P 连接失败，正在重试 (${connectionRetryCount}/${MAX_RETRY_COUNT})...`, 'warning');
+                setTimeout(() => {
+                    socket.emit('screen-share-request');
+                }, 1000);
+            } else {
+                showToast('P2P 连接失败，请检查网络环境', 'error');
+                showConnectionRetryUI(sharerName);
+            }
         } else if (pc.connectionState === 'disconnected') {
-            showToast('屏幕共享连接已断开', 'warning');
+            showToast('屏幕共享连接已断开，尝试 ICE 重连...', 'warning');
+            // 使用 ICE Restart 替代完全重连
+            setTimeout(async () => {
+                if (pc.connectionState === 'disconnected') {
+                    const success = await performIceRestart(sharerId);
+                    if (!success && currentSharer) {
+                        // ICE Restart 失败，回退到完全重连
+                        peerConnections.delete(sharerId);
+                        pc.close();
+                        socket.emit('screen-share-request');
+                    }
+                }
+            }, 2000);
         } else if (pc.connectionState === 'connected') {
+            connectionRetryCount = 0; // 连接成功，重置重试计数
             showToast('屏幕共享连接成功', 'success');
+            hideConnectionRetryUI();
+            // 启动连接质量监控
+            startConnectionMonitor(pc, sharerId);
         }
     };
 
@@ -2755,10 +2803,20 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
     pc._connectionTimeout = setTimeout(() => {
         if (pc.connectionState !== 'connected' && pc.connectionState !== 'completed') {
             console.warn('[屏幕共享] 连接超时');
-            showToast('P2P 连接超时，可能是网络环境不支持直连', 'error');
-            showScreenShareContainer(false);
             peerConnections.delete(sharerId);
             pc.close();
+
+            // 自动重试
+            if (connectionRetryCount < MAX_RETRY_COUNT) {
+                connectionRetryCount++;
+                showToast(`P2P 连接超时，正在重试 (${connectionRetryCount}/${MAX_RETRY_COUNT})...`, 'warning');
+                setTimeout(() => {
+                    socket.emit('screen-share-request');
+                }, 1000);
+            } else {
+                showToast('P2P 连接超时，可能是网络环境不支持直连', 'error');
+                showConnectionRetryUI(sharerName);
+            }
         }
     }, 15000);
 
@@ -2806,6 +2864,217 @@ async function handleScreenShareIce(fromId, candidate) {
 }
 
 /**
+ * ICE Restart - 更轻量的重连方式
+ */
+async function performIceRestart(peerId) {
+    const pc = peerConnections.get(peerId);
+    if (!pc) return false;
+
+    try {
+        console.log('[屏幕共享] 执行 ICE Restart');
+        pc.restartIce();
+
+        // 如果是分享者，需要创建新的 offer
+        if (isScreenSharing) {
+            const offer = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(offer);
+            socket.emit('screen-share-offer', {
+                targetId: peerId,
+                offer: pc.localDescription
+            });
+        }
+        return true;
+    } catch (err) {
+        console.error('[屏幕共享] ICE Restart 失败:', err);
+        return false;
+    }
+}
+
+/**
+ * 启动连接质量监控
+ */
+function startConnectionMonitor(pc, peerId) {
+    // 清除旧的监控
+    stopConnectionMonitor();
+
+    lastBytesReceived = 0;
+    lastStatsTime = Date.now();
+
+    statsInterval = setInterval(async () => {
+        if (!pc || pc.connectionState !== 'connected') {
+            stopConnectionMonitor();
+            return;
+        }
+
+        try {
+            const stats = await pc.getStats();
+            let currentStats = {
+                bytesReceived: 0,
+                packetsLost: 0,
+                packetsReceived: 0,
+                roundTripTime: 0,
+                jitter: 0
+            };
+
+            stats.forEach(report => {
+                if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                    currentStats.bytesReceived = report.bytesReceived || 0;
+                    currentStats.packetsLost = report.packetsLost || 0;
+                    currentStats.packetsReceived = report.packetsReceived || 0;
+                    currentStats.jitter = report.jitter || 0;
+                }
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    currentStats.roundTripTime = report.currentRoundTripTime || 0;
+                }
+            });
+
+            // 计算实时码率
+            const now = Date.now();
+            const timeDiff = (now - lastStatsTime) / 1000;
+            const bytesDiff = currentStats.bytesReceived - lastBytesReceived;
+            const bitrate = timeDiff > 0 ? (bytesDiff * 8 / timeDiff / 1000) : 0; // Kbps
+
+            lastBytesReceived = currentStats.bytesReceived;
+            lastStatsTime = now;
+
+            // 计算丢包率
+            const totalPackets = currentStats.packetsReceived + currentStats.packetsLost;
+            const lossRate = totalPackets > 0 ? (currentStats.packetsLost / totalPackets * 100) : 0;
+
+            // 更新 UI 显示
+            updateConnectionQualityUI({
+                bitrate: bitrate.toFixed(0),
+                lossRate: lossRate.toFixed(1),
+                rtt: (currentStats.roundTripTime * 1000).toFixed(0),
+                jitter: (currentStats.jitter * 1000).toFixed(1)
+            });
+
+            // 自适应码率调整（仅分享者）
+            if (isScreenSharing) {
+                adjustBitrateBasedOnStats(lossRate, currentStats.roundTripTime * 1000);
+            }
+
+        } catch (err) {
+            console.warn('[屏幕共享] 获取统计失败:', err);
+        }
+    }, 2000); // 每2秒更新一次
+}
+
+/**
+ * 停止连接质量监控
+ */
+function stopConnectionMonitor() {
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+    hideConnectionQualityUI();
+}
+
+/**
+ * 更新连接质量 UI
+ */
+function updateConnectionQualityUI(stats) {
+    let qualityEl = document.getElementById('connection-quality-display');
+
+    if (!qualityEl) {
+        // 创建质量显示元素
+        const overlay = document.getElementById('screen-share-overlay');
+        if (!overlay) return;
+
+        qualityEl = document.createElement('div');
+        qualityEl.id = 'connection-quality-display';
+        qualityEl.className = 'connection-quality';
+        overlay.appendChild(qualityEl);
+    }
+
+    // 判断连接质量
+    let quality = 'good';
+    if (parseFloat(stats.lossRate) > 5 || parseFloat(stats.rtt) > 300) {
+        quality = 'poor';
+    } else if (parseFloat(stats.lossRate) > 2 || parseFloat(stats.rtt) > 150) {
+        quality = 'fair';
+    }
+
+    qualityEl.innerHTML = `
+        <span class="quality-indicator ${quality}"></span>
+        <span class="quality-stats">
+            ${stats.bitrate} Kbps | 丢包 ${stats.lossRate}% | 延迟 ${stats.rtt}ms
+        </span>
+    `;
+    qualityEl.style.display = 'flex';
+}
+
+/**
+ * 隐藏连接质量 UI
+ */
+function hideConnectionQualityUI() {
+    const qualityEl = document.getElementById('connection-quality-display');
+    if (qualityEl) {
+        qualityEl.style.display = 'none';
+    }
+}
+
+/**
+ * 自适应码率调整
+ */
+async function adjustBitrateBasedOnStats(lossRate, rtt) {
+    // 判断网络状况
+    const isGood = lossRate < 1 && rtt < 100;
+    const isBad = lossRate > 3 || rtt > 200;
+
+    if (isGood) {
+        consecutiveGoodStats++;
+        consecutiveBadStats = 0;
+
+        // 连续 5 次良好，尝试提升码率
+        if (consecutiveGoodStats >= 5 && currentBitrateLevel < BITRATE_LEVELS.length - 1) {
+            currentBitrateLevel++;
+            await applyBitrateToAllConnections(BITRATE_LEVELS[currentBitrateLevel].bitrate);
+            console.log(`[自适应码率] 提升至 ${BITRATE_LEVELS[currentBitrateLevel].label} (${BITRATE_LEVELS[currentBitrateLevel].bitrate} Kbps)`);
+            consecutiveGoodStats = 0;
+        }
+    } else if (isBad) {
+        consecutiveBadStats++;
+        consecutiveGoodStats = 0;
+
+        // 连续 2 次差，立即降低码率
+        if (consecutiveBadStats >= 2 && currentBitrateLevel > 0) {
+            currentBitrateLevel--;
+            await applyBitrateToAllConnections(BITRATE_LEVELS[currentBitrateLevel].bitrate);
+            showToast(`网络波动，已降低码率至 ${BITRATE_LEVELS[currentBitrateLevel].label}`, 'warning');
+            console.log(`[自适应码率] 降低至 ${BITRATE_LEVELS[currentBitrateLevel].label} (${BITRATE_LEVELS[currentBitrateLevel].bitrate} Kbps)`);
+            consecutiveBadStats = 0;
+        }
+    } else {
+        // 中等状况，重置计数
+        consecutiveGoodStats = 0;
+        consecutiveBadStats = 0;
+    }
+}
+
+/**
+ * 应用码率到所有连接
+ */
+async function applyBitrateToAllConnections(bitrateKbps) {
+    for (const [peerId, pc] of peerConnections) {
+        try {
+            const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender) {
+                const params = sender.getParameters();
+                if (!params.encodings || params.encodings.length === 0) {
+                    params.encodings = [{}];
+                }
+                params.encodings[0].maxBitrate = bitrateKbps * 1000;
+                await sender.setParameters(params);
+            }
+        } catch (err) {
+            console.warn(`[自适应码率] 设置 ${peerId} 码率失败:`, err);
+        }
+    }
+}
+
+/**
  * 更新屏幕共享按钮 UI
  */
 function updateScreenShareUI(sharing) {
@@ -2840,10 +3109,71 @@ function showScreenShareContainer(show, sharerName = '') {
             player.pause();
         }
         if (nameSpan) nameSpan.textContent = sharerName;
+        hideConnectionRetryUI(); // 隐藏重试按钮
     } else {
         container.style.display = 'none';
         const video = document.getElementById('screen-share-video');
         if (video) video.srcObject = null;
+        hideConnectionRetryUI();
+    }
+}
+
+/**
+ * 显示连接重试界面
+ */
+function showConnectionRetryUI(sharerName) {
+    const container = document.getElementById('screen-share-overlay');
+    if (!container) return;
+
+    container.style.display = 'flex';
+
+    // 创建或更新重试提示
+    let retryOverlay = container.querySelector('.retry-overlay');
+    if (!retryOverlay) {
+        retryOverlay = document.createElement('div');
+        retryOverlay.className = 'retry-overlay';
+        retryOverlay.innerHTML = `
+            <div class="retry-content">
+                <i class="fa-solid fa-wifi-slash"></i>
+                <h3>连接失败</h3>
+                <p>无法建立 P2P 连接，可能是网络环境限制</p>
+                <div class="retry-buttons">
+                    <button class="btn btn-primary" id="retry-connect-btn">
+                        <i class="fa-solid fa-rotate-right"></i> 重新连接
+                    </button>
+                    <button class="btn btn-secondary" id="retry-cancel-btn">
+                        取消
+                    </button>
+                </div>
+            </div>
+        `;
+        container.appendChild(retryOverlay);
+
+        // 绑定事件
+        retryOverlay.querySelector('#retry-connect-btn').addEventListener('click', () => {
+            hideConnectionRetryUI();
+            connectionRetryCount = 0;
+            if (currentSharer) {
+                showToast('正在重新连接...', 'info');
+                socket.emit('screen-share-request');
+            }
+        });
+
+        retryOverlay.querySelector('#retry-cancel-btn').addEventListener('click', () => {
+            showScreenShareContainer(false);
+        });
+    }
+
+    retryOverlay.style.display = 'flex';
+}
+
+/**
+ * 隐藏连接重试界面
+ */
+function hideConnectionRetryUI() {
+    const retryOverlay = document.querySelector('.retry-overlay');
+    if (retryOverlay) {
+        retryOverlay.style.display = 'none';
     }
 }
 
@@ -2851,6 +3181,9 @@ function showScreenShareContainer(show, sharerName = '') {
  * 处理屏幕共享停止（观看者角度）
  */
 function handleScreenShareStopped(stoppedBy, reason) {
+    // 停止连接质量监控
+    stopConnectionMonitor();
+
     // 关闭 P2P 连接
     peerConnections.forEach((pc) => pc.close());
     peerConnections.clear();

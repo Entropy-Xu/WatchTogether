@@ -3610,3 +3610,103 @@ input::placeholder {
   font-weight: 600;
   font-size: 0.95rem;
 }
+
+/* ==========================================
+   P2P 连接重试界面
+   ========================================== */
+
+.retry-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.retry-content {
+  text-align: center;
+  padding: 2rem;
+  max-width: 400px;
+}
+
+.retry-content i {
+  font-size: 3rem;
+  color: var(--danger);
+  margin-bottom: 1rem;
+}
+
+.retry-content h3 {
+  font-size: 1.5rem;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.retry-content p {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.retry-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.retry-buttons .btn {
+  padding: 0.75rem 1.5rem;
+  font-size: 0.95rem;
+}
+
+/* ==========================================
+   连接质量显示
+   ========================================== */
+
+.connection-quality {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: var(--radius-pill);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  z-index: 50;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.quality-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.quality-indicator.good {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.quality-indicator.fair {
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning);
+}
+
+.quality-indicator.poor {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+}
+
+.quality-stats {
+  white-space: nowrap;
+}
