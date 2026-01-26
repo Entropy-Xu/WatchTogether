@@ -735,7 +735,7 @@ function createP2PFragmentLoader(p2pLoader) {
         load(context, config, callbacks) {
             const url = context.url;
             const isSegment = context.type === 'fragment';
-            
+
             // 只对视频片段使用 P2P
             if (isSegment && this.p2pLoader && this.p2pLoader.enabled) {
                 // 尝试从 P2P 获取
@@ -773,7 +773,7 @@ function createP2PFragmentLoader(p2pLoader) {
                 }
                 originalOnSuccess(response, stats, context, networkDetails);
             };
-            
+
             // 调用父类的 HTTP 加载
             super.load(context, config, callbacks);
         }
@@ -809,7 +809,7 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
             console.log('解析代理 URL 失败:', e);
         }
     }
-    
+
     const urlLower = urlForTypeDetection.toLowerCase();
     let type = 'video/mp4'; // 默认
 
@@ -942,19 +942,19 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         console.log('使用 hls.js 加载 HLS 流');
 
         const videoElement = player.tech({ IWillNotUseThisInPlugins: true }).el();
-        
+
         // 配置 HLS.js，集成 P2P 加载
         const hlsConfig = {
             enableWorker: true,
             lowLatencyMode: false
         };
-        
+
         // 如果启用了 P2P，添加自定义片段加载器
         if (p2pLoader && p2pEnabled) {
             hlsConfig.fLoader = createP2PFragmentLoader(p2pLoader);
             console.log('[P2P] 已启用 HLS P2P 加载');
         }
-        
+
         const hls = new Hls(hlsConfig);
 
         // Store reference for audio track selector
@@ -990,12 +990,12 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
             console.error('HLS 错误:', data);
             console.log('当前 URL:', url);
             console.log('是否已使用代理:', url.includes('/api/parser/proxy'));
-            
+
             // 检查是否是 CORS 或网络错误，尝试使用代理
             if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR && !url.includes('/api/parser/proxy')) {
                 console.log('HLS 网络错误，尝试使用代理...');
                 hls.destroy();
-                
+
                 // 使用代理 URL 重试
                 const proxyUrl = `/api/parser/proxy?url=${encodeURIComponent(url)}`;
                 console.log('代理 URL:', proxyUrl);
@@ -1003,7 +1003,7 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
                 loadVideo(proxyUrl, startTime, autoPlay);
                 return;
             }
-            
+
             if (data.fatal) {
                 showToast('视频加载失败，可能需要通过代理访问', 'error');
                 isSyncing = false;
@@ -1377,13 +1377,13 @@ function updateUserList(users) {
 function updateP2PStatus() {
     const statusEl = document.getElementById('p2p-status');
     if (!statusEl) return;
-    
+
     const peersEl = statusEl.querySelector('.p2p-peers');
-    
+
     if (p2pLoader && p2pEnabled) {
         const stats = p2pLoader.getStats();
         peersEl.textContent = stats.connectedPeers;
-        
+
         if (stats.connectedPeers > 0) {
             statusEl.classList.add('active');
             statusEl.classList.remove('inactive');
@@ -1991,14 +1991,43 @@ function initCustomControls() {
 
     // Fullscreen - 使用 video-wrapper 容器（包含自定义控件）
     const videoWrapper = document.getElementById('video-wrapper');
+    // Fullscreen Cross-browser support
     fullscreenBtn.addEventListener('click', () => {
-        if (document.fullscreenElement) {
-            document.exitFullscreen();
-            fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
-        } else {
-            videoWrapper.requestFullscreen();
-            fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
+        const videoElement = player.tech(true).el();
+
+        // 1. Exit Fullscreen if active
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+            return;
         }
+
+        // 2. Enter Fullscreen
+        // Try standard/prefixed wrapper fullscreen first (Desktop/Android)
+        if (videoWrapper.requestFullscreen) {
+            videoWrapper.requestFullscreen();
+        } else if (videoWrapper.webkitRequestFullscreen) {
+            videoWrapper.webkitRequestFullscreen();
+        }
+        // 3. Fallback for iOS (Video Element Only)
+        else if (videoElement.webkitEnterFullscreen) {
+            videoElement.webkitEnterFullscreen();
+            // iOS native player doesn't trigger standard fullscreenchange events consistently for the document
+            // manually update icon here, though the native player takes over UI anyway.
+            fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
+        } else {
+            // Last resort: simple full viewport style (optional, maybe not needed if native supported)
+            console.warn('Fullscreen API not supported');
+        }
+    });
+
+    // Listen for iOS native fullscreen exit
+    const videoElement = player.tech(true).el();
+    videoElement.addEventListener('webkitendfullscreen', () => {
+        fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
     });
 
     // 监听全屏变化事件
@@ -2621,12 +2650,43 @@ async function checkBilibiliLoginStatus() {
     }
 }
 
+// Tab Switching Logic
+function initTabListeners() {
+    const tabs = document.querySelectorAll('.input-tab');
+    const contents = document.querySelectorAll('.input-tab-content');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active class from all
+            tabs.forEach(t => t.classList.remove('active'));
+            contents.forEach(c => c.classList.remove('active'));
+
+            // Add active class to current
+            tab.classList.add('active');
+            const targetId = tab.dataset.target;
+            const targetContent = document.getElementById(targetId);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+        });
+    });
+}
+
+// Initialize everything when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    initPermissionListeners();
+    initCustomControls();
+    initBilibiliFeatures();
+    initVideoParser(); // Renamed from initParserFeatures to match existing function name
+    initTabListeners(); // Add tab listeners
+});
+
 // 在 startRoom 中初始化 B 站功能
 const originalStartRoom = startRoom;
 startRoom = function () {
     originalStartRoom();
-    initBilibiliFeatures();
-    initVideoParser();  // 初始化通用视频解析
+    // initBilibiliFeatures(); // Moved to DOMContentLoaded
+    // initVideoParser();  // Moved to DOMContentLoaded
 };
 
 // ==========================================
@@ -2846,7 +2906,7 @@ async function confirmLoadParsedVideo() {
     // 如果是通用解析器已经返回了直接 URL，直接使用
     if (info.directUrl) {
         const videoUrl = info.directUrl;
-        
+
         // 通知房间更换视频
         socket.emit('change-video', {
             url: videoUrl,

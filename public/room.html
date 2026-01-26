@@ -75,57 +75,76 @@
 
       <!-- 视频播放区域 -->
       <div class="video-section">
-        <!-- 视频源输入 -->
+        <!-- 视频源输入区域 (Tabbed) -->
+        <div class="video-input-tabs">
+          <button class="input-tab active" data-target="tab-direct">
+            <i class="fa-solid fa-link"></i> 链接/上传
+          </button>
+          <button class="input-tab" data-target="tab-bilibili">
+            <i class="fa-brands fa-bilibili"></i> B站
+          </button>
+          <button class="input-tab" data-target="tab-parser">
+            <i class="fa-solid fa-globe"></i> 解析
+          </button>
+        </div>
+
         <div class="video-url-bar">
-          <div class="url-input-wrapper">
-            <i class="fa-solid fa-link url-icon"></i>
-            <input type="url" id="video-url-input" placeholder="粘贴视频链接 (支持 MP4, HLS, DASH 等格式)" autocomplete="off">
-            <button id="load-video-btn" class="load-btn">
-              <span>加载视频</span>
-            </button>
-            <span class="divider-text">或</span>
-            <button id="upload-video-btn" class="upload-btn" type="button">
-              <i class="fa-solid fa-file-upload upload-icon"></i>
-              <span>上传文件</span>
-            </button>
-            <input type="file" id="video-file-input" accept="video/*,.mkv,.avi,.flv,.wmv,.ts" style="display: none;">
+          <!-- Tab 1: 直链 & 上传 -->
+          <div class="input-tab-content active" id="tab-direct">
+            <div class="url-input-wrapper">
+              <i class="fa-solid fa-link url-icon"></i>
+              <input type="url" id="video-url-input" placeholder="粘贴视频链接 (MP4, HLS, DASH)" autocomplete="off">
+              <button id="load-video-btn" class="load-btn">
+                <span>加载</span>
+              </button>
+              
+              <div class="mobile-input-row">
+                 <button id="upload-video-btn" class="upload-btn" type="button">
+                  <i class="fa-solid fa-file-upload"></i> <span class="d-none-mobile">上传视频</span>
+                </button>
+                <input type="file" id="video-file-input" accept="video/*,.mkv,.avi,.flv,.wmv,.ts" style="display: none;">
 
-            <button id="upload-subtitle-btn" class="upload-btn secondary" type="button" title="上传字幕 (srt, ass, idx)">
-              <i class="fa-solid fa-closed-captioning upload-icon"></i>
-              <span>加载字幕</span>
-            </button>
-            <input type="file" id="subtitle-file-input" accept=".srt,.ass,.ssa,.sub,.idx" style="display: none;">
+                <button id="upload-subtitle-btn" class="upload-btn secondary" type="button" title="上传字幕">
+                  <i class="fa-solid fa-closed-captioning"></i> <span class="d-none-mobile">上传字幕</span>
+                </button>
+                <input type="file" id="subtitle-file-input" accept=".srt,.ass,.ssa,.sub,.idx" style="display: none;">
+              </div>
+            </div>
           </div>
 
-          <!-- B 站视频解析 -->
-          <div class="bilibili-input-wrapper">
-            <i class="fa-brands fa-bilibili bilibili-icon"></i>
-            <input type="text" id="bilibili-url-input" placeholder="粘贴 B 站链接或 BV 号 (如 BV1xx411c7mD)" autocomplete="off">
-            <button id="parse-bilibili-btn" class="load-btn bilibili-btn">
-              <span>解析B站</span>
-            </button>
-            <button id="bilibili-login-btn" class="upload-btn bilibili-login-btn" type="button" title="登录 B 站账号获取高清视频">
-              <i class="fa-solid fa-user"></i>
-              <span id="bilibili-login-text">登录B站</span>
-            </button>
+          <!-- Tab 2: B站 -->
+          <div class="input-tab-content" id="tab-bilibili">
+            <div class="bilibili-input-wrapper">
+              <i class="fa-brands fa-bilibili bilibili-icon"></i>
+              <input type="text" id="bilibili-url-input" placeholder="B站链接或BV号" autocomplete="off">
+              <button id="parse-bilibili-btn" class="load-btn bilibili-btn">
+                <span>解析</span>
+              </button>
+              <button id="bilibili-login-btn" class="upload-btn bilibili-login-btn" type="button" title="登录账号">
+                <i class="fa-solid fa-user"></i>
+                <span id="bilibili-login-text" class="d-none-mobile">登录</span>
+              </button>
+            </div>
           </div>
 
-          <!-- 通用视频解析 -->
-          <div class="parser-input-wrapper">
-            <i class="fa-solid fa-globe parser-icon"></i>
-            <input type="text" id="parser-url-input" placeholder="粘贴网页视频链接 (支持 YouTube、Twitter、微博、抖音等 1000+ 网站)" autocomplete="off">
-            <button id="parse-video-btn" class="load-btn parser-btn">
-              <span>解析视频</span>
-            </button>
-            <button id="parser-help-btn" class="upload-btn parser-help-btn" type="button" title="查看支持的网站">
-              <i class="fa-solid fa-circle-question"></i>
-            </button>
-            <button id="parser-rules-btn" class="upload-btn parser-rules-btn" type="button" title="管理解析规则">
-              <i class="fa-solid fa-puzzle-piece"></i>
-            </button>
+          <!-- Tab 3: 解析 -->
+          <div class="input-tab-content" id="tab-parser">
+            <div class="parser-input-wrapper">
+              <i class="fa-solid fa-globe parser-icon"></i>
+              <input type="text" id="parser-url-input" placeholder="网页视频链接 (YouTube, 抖音等)" autocomplete="off">
+              <button id="parse-video-btn" class="load-btn parser-btn">
+                <span>解析</span>
+              </button>
+              <button id="parser-help-btn" class="upload-btn parser-help-btn" type="button">
+                <i class="fa-solid fa-circle-question"></i>
+              </button>
+              <button id="parser-rules-btn" class="upload-btn parser-rules-btn" type="button">
+                <i class="fa-solid fa-puzzle-piece"></i>
+              </button>
+            </div>
           </div>
 
-          <!-- 解析进度条 -->
+          <!-- 公共进度条区域 -->
           <div class="parser-progress" id="parser-progress-container" style="display: none;">
             <div class="progress-bar">
               <div class="progress-fill" id="parser-progress-bar"></div>
@@ -133,17 +152,16 @@
             <span class="progress-text" id="parser-progress-text">解析中...</span>
           </div>
 
-          <!-- 上传进度条 -->
           <div class="upload-progress" id="upload-progress" style="display: none;">
             <div class="progress-bar">
               <div class="progress-fill" id="progress-fill"></div>
             </div>
             <span class="progress-text" id="progress-text">上传中... 0%</span>
           </div>
-          <!-- 转码进度提示 -->
+
           <div class="transcode-overlay" id="transcode-overlay" style="display: none;">
             <div class="transcode-spinner"></div>
-            <span class="transcode-text">正在转码处理，请稍候...</span>
+            <span class="transcode-text">正在转码...</span>
           </div>
         </div>
 
