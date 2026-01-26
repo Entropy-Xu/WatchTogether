@@ -350,7 +350,10 @@ async function extract(url, options = {}) {
   });
 
   // 2. 尝试直接提取播放地址
-  if (!forceDownload) {
+  // YouTube 视频必须下载（CDN URL 绑定 IP 且有过期间隔，代理难以处理）
+  const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+
+  if (!forceDownload && !isYouTube) {
     try {
       onProgress?.({
         stage: 'extracting',
