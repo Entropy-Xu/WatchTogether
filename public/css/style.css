@@ -881,10 +881,61 @@ input::placeholder {
   box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2), 0 8px 15px rgba(139, 92, 246, 0.1);
 }
 
+/* Capsule Button (Text + Icon) for Secondary Actions */
+.capsule-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 1.2rem;
+  height: 44px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.capsule-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-color: var(--glass-highlight);
+}
+
+.capsule-btn:active {
+  transform: translateY(0);
+}
+
+/* Specific Style for Bilibili Login inside Capsule */
+.bilibili-login-btn {
+  background: rgba(0, 161, 214, 0.1);
+  border-color: rgba(0, 161, 214, 0.3);
+  color: #00a1d6;
+}
+
+.bilibili-login-btn:hover {
+  background: rgba(0, 161, 214, 0.2);
+  border-color: #00a1d6;
+  color: #fff;
+  box-shadow: 0 0 15px rgba(0, 161, 214, 0.3);
+}
+
+/* Logged in state for new button */
 .bilibili-login-btn.logged-in {
   border-color: var(--success);
   color: var(--success);
   background: rgba(16, 185, 129, 0.1);
+}
+
+.bilibili-login-btn.logged-in:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: var(--success);
+  color: #fff;
 }
 
 /* Hide Old Classes if any remain used inadvertently */
@@ -2763,19 +2814,21 @@ input::placeholder {
 }
 
 #bilibili-url-input {
+  /* Reset for capsule layout */
   flex: 1;
-  min-width: 200px;
-  padding: 0.6rem 1rem;
-  background: rgba(0, 161, 214, 0.1);
-  border: 1px solid rgba(0, 161, 214, 0.3);
-  border-radius: var(--radius-sm);
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   color: var(--text-primary);
-  font-size: 0.9rem;
+  font-size: 1rem;
+  box-shadow: none;
 }
 
 #bilibili-url-input:focus {
-  border-color: #00a1d6;
-  box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.2);
+  border: none;
+  box-shadow: none;
   outline: none;
 }
 
@@ -3092,19 +3145,21 @@ input::placeholder {
 }
 
 #parser-url-input {
+  /* Reset for capsule layout */
   flex: 1;
-  min-width: 200px;
-  padding: 0.6rem 1rem;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.3);
-  border-radius: var(--radius-sm);
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   color: var(--text-primary);
-  font-size: 0.9rem;
+  font-size: 1rem;
+  box-shadow: none;
 }
 
 #parser-url-input:focus {
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+  border: none;
+  box-shadow: none;
   outline: none;
 }
 
