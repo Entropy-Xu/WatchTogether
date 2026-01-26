@@ -1202,9 +1202,8 @@ function uploadSubtitle(file) {
     const uploadBtn = document.getElementById('upload-subtitle-btn');
 
     // 简单 loading 状态
-    const originalText = uploadBtn.querySelector('span').textContent;
     uploadBtn.disabled = true;
-    uploadBtn.querySelector('span').textContent = '转换中...';
+    // uploadBtn.querySelector('span').textContent = '转换中...'; // 移除对 span 的依赖
 
     const formData = new FormData();
     formData.append('video', file); // 复用 multer 'video' 字段
@@ -1232,7 +1231,7 @@ function uploadSubtitle(file) {
         })
         .finally(() => {
             uploadBtn.disabled = false;
-            uploadBtn.querySelector('span').textContent = originalText;
+            // uploadBtn.querySelector('span').textContent = originalText;
             document.getElementById('subtitle-file-input').value = '';
         });
 }
@@ -1246,7 +1245,7 @@ function uploadVideo(file) {
 
     // 禁用上传按钮
     uploadBtn.disabled = true;
-    uploadBtn.querySelector('span:last-child').textContent = '上传中...';
+    // uploadBtn.querySelector('span:last-child').textContent = '上传中...';
 
     // 显示进度条
     uploadProgress.style.display = 'flex';
@@ -1308,7 +1307,7 @@ function uploadVideo(file) {
 
         // 恢复按钮状态
         uploadBtn.disabled = false;
-        uploadBtn.querySelector('span:last-child').textContent = '上传文件';
+        // uploadBtn.querySelector('span:last-child').textContent = '上传文件';
     });
 
     // 上传错误
@@ -1317,7 +1316,7 @@ function uploadVideo(file) {
         uploadProgress.style.display = 'none';
         transcodeOverlay.style.display = 'none';
         uploadBtn.disabled = false;
-        uploadBtn.querySelector('span:last-child').textContent = '上传文件';
+        // uploadBtn.querySelector('span:last-child').textContent = '上传文件';
     });
 
     // 发送请求
@@ -2642,7 +2641,7 @@ async function checkBilibiliLoginStatus() {
             loginBtn.title = `已登录: ${result.username}`;
         } else {
             loginBtn.classList.remove('logged-in');
-            loginText.textContent = '登录B站';
+            loginText.textContent = '登录';
             loginBtn.title = '登录 B 站账号获取高清视频';
         }
     } catch (err) {

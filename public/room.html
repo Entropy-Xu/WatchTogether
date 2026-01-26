@@ -91,21 +91,22 @@
         <div class="video-url-bar">
           <!-- Tab 1: 直链 & 上传 -->
           <div class="input-tab-content active" id="tab-direct">
-            <div class="url-input-wrapper">
-              <i class="fa-solid fa-link url-icon"></i>
-              <input type="url" id="video-url-input" placeholder="粘贴视频链接 (MP4, HLS, DASH)" autocomplete="off">
-              <button id="load-video-btn" class="load-btn">
-                <span>加载</span>
-              </button>
+            <div class="input-action-container">
+              <div class="main-input-group">
+                <input type="url" id="video-url-input" placeholder="粘贴视频直链 (MP4, M3U8)..." autocomplete="off">
+                <button id="load-video-btn" class="load-btn">
+                  <span>播放</span>
+                </button>
+              </div>
               
-              <div class="mobile-input-row">
-                 <button id="upload-video-btn" class="upload-btn" type="button">
-                  <i class="fa-solid fa-file-upload"></i> <span class="d-none-mobile">上传视频</span>
+              <div class="secondary-actions">
+                 <button id="upload-video-btn" class="icon-btn" type="button" title="上传视频">
+                  <i class="fa-solid fa-file-upload"></i>
                 </button>
                 <input type="file" id="video-file-input" accept="video/*,.mkv,.avi,.flv,.wmv,.ts" style="display: none;">
 
-                <button id="upload-subtitle-btn" class="upload-btn secondary" type="button" title="上传字幕">
-                  <i class="fa-solid fa-closed-captioning"></i> <span class="d-none-mobile">上传字幕</span>
+                <button id="upload-subtitle-btn" class="icon-btn" type="button" title="上传字幕">
+                  <i class="fa-solid fa-closed-captioning"></i>
                 </button>
                 <input type="file" id="subtitle-file-input" accept=".srt,.ass,.ssa,.sub,.idx" style="display: none;">
               </div>
@@ -114,33 +115,38 @@
 
           <!-- Tab 2: B站 -->
           <div class="input-tab-content" id="tab-bilibili">
-            <div class="bilibili-input-wrapper">
-              <i class="fa-brands fa-bilibili bilibili-icon"></i>
-              <input type="text" id="bilibili-url-input" placeholder="B站链接或BV号" autocomplete="off">
-              <button id="parse-bilibili-btn" class="load-btn bilibili-btn">
-                <span>解析</span>
-              </button>
-              <button id="bilibili-login-btn" class="upload-btn bilibili-login-btn" type="button" title="登录账号">
-                <i class="fa-solid fa-user"></i>
-                <span id="bilibili-login-text" class="d-none-mobile">登录</span>
-              </button>
+            <div class="input-action-container">
+              <div class="main-input-group">
+                <input type="text" id="bilibili-url-input" placeholder="粘贴 B站链接或 BV号..." autocomplete="off">
+                <button id="parse-bilibili-btn" class="load-btn bilibili-btn">
+                  <span>解析</span>
+                </button>
+              </div>
+              <div class="secondary-actions">
+                <button id="bilibili-login-btn" class="icon-btn" type="button" title="B站登录">
+                  <i class="fa-solid fa-user"></i>
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- Tab 3: 解析 -->
           <div class="input-tab-content" id="tab-parser">
-            <div class="parser-input-wrapper">
-              <i class="fa-solid fa-globe parser-icon"></i>
-              <input type="text" id="parser-url-input" placeholder="网页视频链接 (YouTube, 抖音等)" autocomplete="off">
-              <button id="parse-video-btn" class="load-btn parser-btn">
-                <span>解析</span>
-              </button>
-              <button id="parser-help-btn" class="upload-btn parser-help-btn" type="button">
-                <i class="fa-solid fa-circle-question"></i>
-              </button>
-              <button id="parser-rules-btn" class="upload-btn parser-rules-btn" type="button">
-                <i class="fa-solid fa-puzzle-piece"></i>
-              </button>
+            <div class="input-action-container">
+              <div class="main-input-group">
+                <input type="text" id="parser-url-input" placeholder="粘贴网页视频链接 (YouTube, 抖音等)..." autocomplete="off">
+                <button id="parse-video-btn" class="load-btn parser-btn">
+                  <span>解析</span>
+                </button>
+              </div>
+              <div class="secondary-actions">
+                <button id="parser-help-btn" class="icon-btn" type="button" title="支持的网站">
+                  <i class="fa-solid fa-circle-question"></i>
+                </button>
+                <button id="parser-rules-btn" class="icon-btn" type="button" title="解析规则">
+                  <i class="fa-solid fa-puzzle-piece"></i>
+                </button>
+              </div>
             </div>
           </div>
 

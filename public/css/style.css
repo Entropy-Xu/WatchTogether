@@ -763,91 +763,168 @@ input::placeholder {
   }
 }
 
-/* 调整 input wrapper 在 tab 内部的样式 */
-.url-input-wrapper,
-.bilibili-input-wrapper,
-.parser-input-wrapper {
-  flex: 1;
+/* ==========================================
+   Input Action Bar (New Design)
+   ========================================== */
+
+/* Overall Container */
+.input-action-container {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 1.8rem;
-  /* Further increase desktop padding */
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
-  margin: 0.2rem 0;
-  /* Add slight vertical margin */
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0.5rem 0; /* Vertical breathing room */
 }
 
-.progress-bar-container {
-  padding: 0 1.5rem 0.8rem;
+/* The Search Pill (Main Input + Button) */
+.main-input-group {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: 50px; /* Full rounded corners */
+  padding: 0.25rem 0.3rem 0.25rem 1.5rem; /* Left padding for text, Right small for button */
+  gap: 0.5rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  min-width: 0; /* Flexbox fix */
+}
+
+.main-input-group:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2), 0 8px 15px rgba(0, 0, 0, 0.2);
+  background: var(--bg-secondary);
+  transform: translateY(-1px);
+}
+
+.main-input-group:hover {
+  background: var(--bg-secondary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.main-input-group input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 1rem;
+  padding: 0.5rem 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.main-input-group input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 300;
+}
+
+/* Action Button inside Pill */
+.main-input-group .load-btn {
+  border-radius: 40px;
+  padding: 0.5rem 1.2rem;
+  height: 40px;
+  min-width: 80px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+}
+
+/* Secondary Actions Area */
+.secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+/* Icon Buttons (Circle) */
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-color: var(--glass-highlight);
+}
+
+.icon-btn:active {
+  transform: translateY(0);
+}
+
+/* Bilibili & Parser Theme Overrides in new structure */
+.input-tab-content#tab-bilibili .main-input-group:focus-within {
+  border-color: #00a1d6;
+  box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.2), 0 8px 15px rgba(0, 161, 214, 0.1);
+}
+
+.input-tab-content#tab-parser .main-input-group:focus-within {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2), 0 8px 15px rgba(139, 92, 246, 0.1);
+}
+
+.bilibili-login-btn.logged-in {
+  border-color: var(--success);
+  color: var(--success);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+/* Hide Old Classes if any remain used inadvertently */
+.url-icon,
+.bilibili-icon,
+.parser-icon {
+  display: none !important;
 }
 
 /* Mobile Optimizations */
 @media (max-width: 768px) {
   .video-input-tabs {
-    padding: 0 0.5rem;
-    gap: 0;
-    justify-content: space-between;
-  }
-
-  .input-tab {
-    flex: 1;
-    justify-content: center;
-    padding: 0.8rem 0.5rem;
-    font-size: 0.85rem;
-  }
-
-  .input-tab-content {
-    padding: 1rem;
-  }
-
-  .url-input-wrapper,
-  .bilibili-input-wrapper,
-  .parser-input-wrapper {
-    flex-wrap: wrap;
-    padding: 1rem;
-    /* Increase mobile padding */
-    gap: 0.8rem;
-  }
-
-  .url-input-wrapper input,
-  .bilibili-input-wrapper input,
-  .parser-input-wrapper input {
-    width: 100%;
-    min-width: 100%;
-    order: 1;
-    /* Input on new line if needed, or first */
-    border-bottom: 1px solid var(--glass-border);
+    padding-top: 0.5rem;
     padding-bottom: 0.5rem;
-    margin-bottom: 0.2rem;
   }
 
-  .load-btn,
-  .upload-btn,
-  .mobile-input-row {
-    flex: 1;
+  .input-action-container {
+    flex-direction: column;
+    gap: 1rem;
+    padding: 0;
+  }
+
+  .main-input-group {
+    width: 100%;
+    padding-left: 1.2rem;
+  }
+  
+  .secondary-actions {
+    width: 100%;
     justify-content: center;
-    order: 2;
+    gap: 1.5rem; /* Larger touch targets gap */
   }
 
-  /* Hide unnecessary text labels on mobile buttons if icon exists */
-  .d-none-mobile {
-    display: none !important;
+  .icon-btn {
+    width: 48px;
+    height: 48px;
+    font-size: 1.2rem;
   }
+}
 
-  /* Optimize Control Bar for Mobile */
-  .custom-controls {
-    padding: 0.2rem 0.5rem !important;
-    /* Reduce padding */
-    flex-wrap: wrap;
-  }
-
-  .active-hidden-mobile {
-    display: none !important;
-  }
 
   /* Fix stacked time display */
   .time-display {
@@ -3055,10 +3132,18 @@ input::placeholder {
   border: 1px solid rgba(139, 92, 246, 0.3);
   color: #8b5cf6;
   padding: 0.6rem 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .parser-help-btn:hover {
   background: rgba(139, 92, 246, 0.25);
+}
+
+.parser-help-btn span {
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 /* 解析进度条 */
@@ -3280,11 +3365,19 @@ input::placeholder {
 .parser-rules-btn {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2)) !important;
   border-color: rgba(99, 102, 241, 0.3) !important;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .parser-rules-btn:hover {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3)) !important;
   border-color: rgba(99, 102, 241, 0.5) !important;
+}
+
+.parser-rules-btn span {
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 /* 标签页切换 */
