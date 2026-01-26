@@ -3310,3 +3310,303 @@ input::placeholder {
     font-size: 1.1rem;
   }
 }
+
+/* ==========================================
+   屏幕共享样式
+   ========================================== */
+
+/* 屏幕共享按钮 */
+.screen-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+
+.screen-share-btn i {
+  font-size: 1rem;
+}
+
+.screen-share-btn.sharing {
+  background: linear-gradient(135deg, var(--error), #dc2626);
+  border-color: rgba(244, 63, 94, 0.5);
+  animation: shareGlow 2s ease-in-out infinite;
+}
+
+.screen-share-btn.sharing:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.4);
+}
+
+@keyframes shareGlow {
+
+  0%,
+  100% {
+    box-shadow: 0 0 5px rgba(244, 63, 94, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 15px rgba(244, 63, 94, 0.5);
+  }
+}
+
+/* 屏幕共享覆盖层 */
+.screen-share-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+#screen-share-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.screen-share-controls {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1.2rem;
+  background: rgba(15, 15, 20, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50px;
+  z-index: 101;
+  transition: opacity 0.3s ease;
+}
+
+/* 鼠标静止时隐藏控制条 */
+.screen-share-overlay:hover .screen-share-controls {
+  opacity: 1;
+}
+
+.screen-share-overlay:not(:hover) .screen-share-controls {
+  opacity: 0;
+}
+
+.sharer-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #fff;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.sharer-info .sharer-name {
+  color: var(--primary-light);
+  font-weight: 600;
+}
+
+.close-share-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.8rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.close-share-btn:hover {
+  background: var(--error);
+  color: white;
+}
+
+/* 额外控制按钮 (音量/全屏) */
+.extra-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 1rem;
+  padding-left: 1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.volume-control-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.volume-control-group:hover .volume-slider {
+  width: 60px;
+  opacity: 1;
+}
+
+.volume-slider {
+  width: 0;
+  opacity: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.3);
+  outline: none;
+  transition: all 0.3s ease;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.control-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+/* 用户列表中的共享状态 */
+.user-screen-share-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.badge.sharing {
+  background: var(--error);
+  color: white;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  animation: pulse 2s infinite;
+}
+
+.watch-btn {
+  padding: 2px 8px;
+  height: 24px;
+  font-size: 0.8rem;
+  border-radius: 4px;
+}
+
+/* ==========================================
+   屏幕共享设置弹窗
+   ========================================== */
+
+.screen-share-settings-modal {
+  max-width: 480px;
+  width: 90%;
+}
+
+.setting-group {
+  margin-bottom: 1.5rem;
+}
+
+.setting-group>label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+}
+
+.setting-group>label i {
+  color: var(--primary-light);
+  font-size: 1rem;
+}
+
+.preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.preset-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+}
+
+.preset-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.custom-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+}
+
+.custom-input-row input {
+  flex: 1;
+  max-width: 100px;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.custom-input-row input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.custom-input-row span {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.settings-preview {
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.settings-preview span {
+  color: var(--primary-light);
+  font-weight: 600;
+  font-size: 0.95rem;
+}

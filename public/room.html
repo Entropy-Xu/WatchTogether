@@ -37,6 +37,11 @@
             <i class="fa-solid fa-user-plus"></i>
             <span class="d-none-mobile">邀请</span>
           </button>
+          <!-- 屏幕共享按钮 -->
+          <button class="btn btn-secondary screen-share-btn" id="screen-share-btn" title="共享屏幕">
+            <i class="fa-solid fa-display"></i>
+            <span class="d-none-mobile">共享屏幕</span>
+          </button>
         </div>
       </div>
       <div class="header-right">
@@ -62,6 +67,8 @@
 
     <!-- 主内容区域 -->
     <div class="room-main">
+
+
       <!-- 视频播放区域 -->
       <div class="video-section">
         <!-- 视频源输入 -->
@@ -115,6 +122,18 @@
         <!-- 视频播放器 -->
         <!-- Choosen Custom Player Container -->
         <div class="video-wrapper" id="video-wrapper">
+          <!-- 屏幕共享覆盖层 (移动到这里) -->
+          <div id="screen-share-overlay" class="screen-share-overlay" style="display: none;">
+            <video id="screen-share-video" autoplay playsinline></video>
+            <div class="screen-share-controls">
+              <div class="sharer-info">
+                <i class="fa-solid fa-display"></i>
+                <span class="sharer-name"></span>
+                <span>正在共享屏幕</span>
+              </div>
+              <!-- 退出按钮已移除 -->
+            </div>
+          </div>
           <!-- Video Element -->
           <video id="video-player" class="video-js vjs-big-play-centered vjs-theme-cinema" playsinline>
             <p class="vjs-no-js">
@@ -449,6 +468,78 @@
             <div id="bilibili-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 屏幕共享设置弹窗 -->
+  <div id="screen-share-settings-modal" class="modal-overlay">
+    <div class="modal-content screen-share-settings-modal">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-display"></i> 屏幕共享设置</h3>
+        <button class="modal-close-btn" id="screen-share-settings-close" title="关闭">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- 分辨率 -->
+        <div class="setting-group">
+          <label><i class="fa-solid fa-expand"></i> 分辨率</label>
+          <div class="preset-buttons" id="resolution-presets">
+            <button class="preset-btn" data-value="1280x720">720p</button>
+            <button class="preset-btn active" data-value="1920x1080">1080p</button>
+            <button class="preset-btn" data-value="2560x1440">1440p</button>
+            <button class="preset-btn" data-value="3840x2160">4K</button>
+            <button class="preset-btn" data-value="custom">自定义</button>
+          </div>
+          <div class="custom-input-row" id="resolution-custom" style="display: none;">
+            <input type="number" id="custom-width" placeholder="宽度" min="640" max="7680">
+            <span>×</span>
+            <input type="number" id="custom-height" placeholder="高度" min="360" max="4320">
+          </div>
+        </div>
+
+        <!-- 帧率 -->
+        <div class="setting-group">
+          <label><i class="fa-solid fa-gauge-high"></i> 帧率 (FPS)</label>
+          <div class="preset-buttons" id="framerate-presets">
+            <button class="preset-btn" data-value="24">24</button>
+            <button class="preset-btn active" data-value="30">30</button>
+            <button class="preset-btn" data-value="60">60</button>
+            <button class="preset-btn" data-value="custom">自定义</button>
+          </div>
+          <div class="custom-input-row" id="framerate-custom" style="display: none;">
+            <input type="number" id="custom-framerate" placeholder="帧率" min="1" max="144">
+            <span>FPS</span>
+          </div>
+        </div>
+
+        <!-- 码率 -->
+        <div class="setting-group">
+          <label><i class="fa-solid fa-chart-line"></i> 码率</label>
+          <div class="preset-buttons" id="bitrate-presets">
+            <button class="preset-btn" data-value="1000">1 Mbps</button>
+            <button class="preset-btn" data-value="2500">2.5 Mbps</button>
+            <button class="preset-btn active" data-value="5000">5 Mbps</button>
+            <button class="preset-btn" data-value="8000">8 Mbps</button>
+            <button class="preset-btn" data-value="custom">自定义</button>
+          </div>
+          <div class="custom-input-row" id="bitrate-custom" style="display: none;">
+            <input type="number" id="custom-bitrate" placeholder="码率" min="500" max="50000">
+            <span>Kbps</span>
+          </div>
+        </div>
+
+        <!-- 当前设置预览 -->
+        <div class="settings-preview">
+          <span id="settings-preview-text">1920×1080 @ 30fps, 5 Mbps</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="screen-share-cancel-btn" class="btn btn-secondary">取消</button>
+        <button id="screen-share-start-btn" class="btn btn-primary">
+          <i class="fa-solid fa-display"></i> 开始共享
+        </button>
       </div>
     </div>
   </div>

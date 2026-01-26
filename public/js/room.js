@@ -20,6 +20,18 @@ let roomSettings = {
     allowAllControl: true
 };
 
+// 屏幕共享相关变量
+let screenStream = null;           // 本地屏幕流
+let peerConnections = new Map();   // peerId -> RTCPeerConnection
+let isScreenSharing = false;       // 是否正在共享
+let currentSharer = null;          // 当前共享者信息 { id, name }
+const rtcConfig = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+};
+
 // ==========================================
 // 工具函数
 // ==========================================
@@ -571,6 +583,21 @@ function joinRoom() {
             // 加载聊天记录
             if (response.messages && response.messages.length > 0) {
                 response.messages.forEach(msg => addChatMessage(msg, false));
+            }
+
+            // 同步屏幕共享状态 - 如果有人正在共享
+            if (response.screenShareState && response.screenShareState.isSharing) {
+                console.log('[屏幕共享] 加入时发现有人正在共享:', response.screenShareState.sharerName);
+                currentSharer = {
+                    id: response.screenShareState.sharerId,
+                    name: response.screenShareState.sharerName
+                };
+                showNotification(`${response.screenShareState.sharerName} 正在共享屏幕`);
+                // 延迟发送请求，确保事件监听器已初始化
+                setTimeout(() => {
+                    socket.emit('screen-share-request');
+                    console.log('[屏幕共享] 加入时发送 screen-share-request');
+                }, 500);
             }
 
             showToast(`已加入放映室 ${roomId}`, 'success');
@@ -1171,19 +1198,42 @@ function updateUserList(users) {
     const userList = document.getElementById('user-list');
     const userCount = document.getElementById('user-count').querySelector('.count');
 
+    userList.innerHTML = '';
     userCount.textContent = users.length;
 
-    userList.innerHTML = users.map(user => {
-        const isCurrentUser = socket && user.id === socket.id;
-        return `
-        <li class="user-item">
+    users.forEach(user => {
+        const li = document.createElement('li');
+        li.className = 'user-item';
+
+        // 名字颜色：房主金色，自己绿色，其他人白色
+        let nameClass = '';
+        if (user.isHost) nameClass = 'is-host';
+        if (user.id === socket.id) nameClass = 'is-self';
+
+        // 屏幕共享标识
+        let screenShareBadge = '';
+        if (currentSharer && currentSharer.id === user.id) {
+            screenShareBadge = `
+                <div class="user-screen-share-status">
+                    <span class="badge sharing">共享中</span>
+                    ${user.id !== socket.id ? `<button onclick="joinScreenShare()" class="btn-xs btn-primary watch-btn" title="观看共享"><i class="fa-solid fa-eye"></i></button>` : ''}
+                </div>
+            `;
+        }
+
+        li.innerHTML = `
             <div class="user-avatar">${getInitial(user.name)}</div>
-            <span class="user-name">${escapeHtml(user.name)}</span>
-            ${user.isHost ? '<span class="host-badge" title="房主"><i class="fa-solid fa-crown"></i></span>' : ''}
-            ${isCurrentUser ? '<button class="edit-nickname-btn" onclick="showNicknameModal()" title="修改昵称"><i class="fa-solid fa-pen"></i></button>' : ''}
-        </li>
+            <div class="user-info">
+                <div class="user-name ${nameClass}">
+                    ${user.name}
+                    ${user.isHost ? '<span class="host-badge" title="房主"><i class="fa-solid fa-crown"></i></span>' : ''}
+                </div>
+                ${screenShareBadge}
+            </div>
+            ${user.id === socket.id ? '<button class="edit-nickname-btn" onclick="showNicknameModal()" title="修改昵称"><i class="fa-solid fa-pen"></i></button>' : ''}
         `;
-    }).join('');
+        userList.appendChild(li);
+    });
 }
 
 // ==========================================
@@ -2341,4 +2391,639 @@ const originalStartRoom = startRoom;
 startRoom = function () {
     originalStartRoom();
     initBilibiliFeatures();
+};
+
+// ==========================================
+// 屏幕共享功能
+// ==========================================
+
+// 屏幕共享设置
+let screenShareSettings = {
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    bitrate: 5000 // Kbps
+};
+
+/**
+ * 显示屏幕共享设置弹窗
+ */
+function showScreenShareSettingsModal() {
+    if (isScreenSharing) {
+        showToast('你已经在共享屏幕', 'warning');
+        return;
+    }
+
+    if (currentSharer) {
+        showToast(`${currentSharer.name} 正在共享屏幕`, 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('screen-share-settings-modal');
+    modal.classList.add('show');
+    updateSettingsPreview();
+}
+
+/**
+ * 隐藏屏幕共享设置弹窗
+ */
+function hideScreenShareSettingsModal() {
+    const modal = document.getElementById('screen-share-settings-modal');
+    modal.classList.remove('show');
+}
+
+/**
+ * 更新设置预览文本
+ */
+function updateSettingsPreview() {
+    const preview = document.getElementById('settings-preview-text');
+    const bitrateStr = screenShareSettings.bitrate >= 1000
+        ? `${(screenShareSettings.bitrate / 1000).toFixed(1)} Mbps`
+        : `${screenShareSettings.bitrate} Kbps`;
+    preview.textContent = `${screenShareSettings.width}×${screenShareSettings.height} @ ${screenShareSettings.frameRate}fps, ${bitrateStr}`;
+}
+
+/**
+ * 初始化屏幕共享设置弹窗交互
+ */
+function initScreenShareSettingsModal() {
+    const modal = document.getElementById('screen-share-settings-modal');
+    if (!modal) return;
+
+    // 关闭按钮
+    document.getElementById('screen-share-settings-close')?.addEventListener('click', hideScreenShareSettingsModal);
+    document.getElementById('screen-share-cancel-btn')?.addEventListener('click', hideScreenShareSettingsModal);
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) hideScreenShareSettingsModal();
+    });
+
+    // 开始共享按钮
+    document.getElementById('screen-share-start-btn')?.addEventListener('click', () => {
+        hideScreenShareSettingsModal();
+        startScreenShareWithSettings();
+    });
+
+    // 分辨率预设按钮
+    initPresetButtons('resolution-presets', 'resolution-custom', (value) => {
+        if (value !== 'custom') {
+            const [w, h] = value.split('x').map(Number);
+            screenShareSettings.width = w;
+            screenShareSettings.height = h;
+        }
+        updateSettingsPreview();
+    });
+
+    // 帧率预设按钮
+    initPresetButtons('framerate-presets', 'framerate-custom', (value) => {
+        if (value !== 'custom') {
+            screenShareSettings.frameRate = parseInt(value);
+        }
+        updateSettingsPreview();
+    });
+
+    // 码率预设按钮
+    initPresetButtons('bitrate-presets', 'bitrate-custom', (value) => {
+        if (value !== 'custom') {
+            screenShareSettings.bitrate = parseInt(value);
+        }
+        updateSettingsPreview();
+    });
+
+    // 自定义输入监听
+    document.getElementById('custom-width')?.addEventListener('input', (e) => {
+        screenShareSettings.width = parseInt(e.target.value) || 1920;
+        updateSettingsPreview();
+    });
+    document.getElementById('custom-height')?.addEventListener('input', (e) => {
+        screenShareSettings.height = parseInt(e.target.value) || 1080;
+        updateSettingsPreview();
+    });
+    document.getElementById('custom-framerate')?.addEventListener('input', (e) => {
+        screenShareSettings.frameRate = parseInt(e.target.value) || 30;
+        updateSettingsPreview();
+    });
+    document.getElementById('custom-bitrate')?.addEventListener('input', (e) => {
+        screenShareSettings.bitrate = parseInt(e.target.value) || 5000;
+        updateSettingsPreview();
+    });
+}
+
+/**
+ * 初始化预设按钮组
+ */
+function initPresetButtons(presetsId, customRowId, onChange) {
+    const container = document.getElementById(presetsId);
+    const customRow = document.getElementById(customRowId);
+    if (!container) return;
+
+    container.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            // 移除其他按钮的 active
+            container.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const value = btn.dataset.value;
+
+            // 显示/隐藏自定义输入
+            if (customRow) {
+                customRow.style.display = value === 'custom' ? 'flex' : 'none';
+            }
+
+            onChange(value);
+        });
+    });
+}
+
+/**
+ * 开始屏幕共享（应用设置）
+ */
+async function startScreenShareWithSettings() {
+    if (isScreenSharing) {
+        showToast('你已经在共享屏幕', 'warning');
+        return;
+    }
+
+    if (currentSharer) {
+        showToast(`${currentSharer.name} 正在共享屏幕`, 'warning');
+        return;
+    }
+
+    try {
+        // 获取屏幕流，应用分辨率和帧率约束
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                cursor: 'always',
+                width: { ideal: screenShareSettings.width },
+                height: { ideal: screenShareSettings.height },
+                frameRate: { ideal: screenShareSettings.frameRate }
+            },
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true
+            }
+        });
+
+        // 监听用户停止共享（点击浏览器的“停止共享”按钮）
+        screenStream.getVideoTracks()[0].onended = () => {
+            stopScreenShare();
+        };
+
+        // 通知服务器开始共享
+        socket.emit('screen-share-start', (response) => {
+            if (response.success) {
+                isScreenSharing = true;
+                updateScreenShareUI(true);
+                const bitrateStr = screenShareSettings.bitrate >= 1000
+                    ? `${(screenShareSettings.bitrate / 1000).toFixed(1)} Mbps`
+                    : `${screenShareSettings.bitrate} Kbps`;
+                showToast(`开始共享 (${screenShareSettings.width}×${screenShareSettings.height}, ${screenShareSettings.frameRate}fps, ${bitrateStr})`, 'success');
+                console.log('[屏幕共享] 开始共享，设置:', screenShareSettings);
+            } else {
+                // 失败，释放流
+                screenStream.getTracks().forEach(track => track.stop());
+                screenStream = null;
+                showToast(response.error || '无法开始屏幕共享', 'error');
+            }
+        });
+
+    } catch (err) {
+        console.error('[屏幕共享] 获取屏幕流失败:', err);
+        if (err.name === 'NotAllowedError') {
+            showToast('屏幕共享已取消', 'info');
+        } else {
+            showToast('无法获取屏幕流', 'error');
+        }
+    }
+}
+
+/**
+ * 开始屏幕共享（兼容旧接口，现在改为显示设置弹窗）
+ */
+function startScreenShare() {
+    showScreenShareSettingsModal();
+}
+
+/**
+ * 停止屏幕共享
+ */
+function stopScreenShare() {
+    if (!isScreenSharing) return;
+
+    // 停止屏幕流
+    if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+        screenStream = null;
+    }
+
+    // 关闭所有 P2P 连接
+    peerConnections.forEach((pc, peerId) => {
+        pc.close();
+    });
+    peerConnections.clear();
+
+    isScreenSharing = false;
+    updateScreenShareUI(false);
+
+    // 通知服务器
+    socket.emit('screen-share-stop');
+    showToast('已停止屏幕共享', 'info');
+    console.log('[屏幕共享] 停止共享');
+}
+
+/**
+ * 为新观看者创建 P2P 连接并发送 offer
+ */
+async function createOfferForViewer(viewerId, viewerName) {
+    if (!screenStream) return;
+
+    console.log(`[屏幕共享] 为观看者 ${viewerName} 创建连接`);
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    peerConnections.set(viewerId, pc);
+
+    // 添加屏幕流轨道
+    screenStream.getTracks().forEach(track => {
+        pc.addTrack(track, screenStream);
+    });
+
+    // 应用码率限制
+    try {
+        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) {
+            const params = sender.getParameters();
+            if (!params.encodings) {
+                params.encodings = [{}];
+            }
+            params.encodings[0].maxBitrate = screenShareSettings.bitrate * 1000; // Kbps to bps
+            await sender.setParameters(params);
+            console.log(`[屏幕共享] 应用码率限制: ${screenShareSettings.bitrate} Kbps`);
+        }
+    } catch (err) {
+        console.warn('[屏幕共享] 设置码率失败:', err);
+    }
+
+    // ICE candidate 交换
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('screen-share-ice', {
+                targetId: viewerId,
+                candidate: event.candidate
+            });
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        console.log(`[屏幕共享] 与 ${viewerName} 连接状态: ${pc.connectionState}`);
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            pc.close();
+            peerConnections.delete(viewerId);
+        }
+    };
+
+    // 创建并发送 offer
+    try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        socket.emit('screen-share-offer', {
+            targetId: viewerId,
+            offer: pc.localDescription
+        });
+    } catch (err) {
+        console.error('[屏幕共享] 创建 offer 失败:', err);
+    }
+}
+
+/**
+ * 观看者处理收到的 offer
+ */
+async function handleScreenShareOffer(sharerId, sharerName, offer) {
+    console.log(`[屏幕共享] 收到来自 ${sharerName} 的 offer`);
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    peerConnections.set(sharerId, pc);
+
+    // ICE candidate 交换
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('screen-share-ice', {
+                targetId: sharerId,
+                candidate: event.candidate
+            });
+        }
+    };
+
+    // 接收远程流
+    pc.ontrack = (event) => {
+        console.log('[屏幕共享] 收到远程流');
+        const video = document.getElementById('screen-share-video');
+        if (video && event.streams[0]) {
+            video.srcObject = event.streams[0];
+            showScreenShareContainer(true, sharerName);
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        console.log(`[屏幕共享] 与分享者连接状态: ${pc.connectionState}`);
+    };
+
+    try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit('screen-share-answer', {
+            targetId: sharerId,
+            answer: pc.localDescription
+        });
+    } catch (err) {
+        console.error('[屏幕共享] 处理 offer 失败:', err);
+    }
+}
+
+/**
+ * 分享者处理收到的 answer
+ */
+async function handleScreenShareAnswer(viewerId, answer) {
+    const pc = peerConnections.get(viewerId);
+    if (!pc) return;
+
+    try {
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log(`[屏幕共享] 与观看者 ${viewerId} 连接已建立`);
+    } catch (err) {
+        console.error('[屏幕共享] 处理 answer 失败:', err);
+    }
+}
+
+/**
+ * 处理 ICE candidate
+ */
+async function handleScreenShareIce(fromId, candidate) {
+    const pc = peerConnections.get(fromId);
+    if (!pc) return;
+
+    try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+        console.error('[屏幕共享] 添加 ICE candidate 失败:', err);
+    }
+}
+
+/**
+ * 更新屏幕共享按钮 UI
+ */
+function updateScreenShareUI(sharing) {
+    const btn = document.getElementById('screen-share-btn');
+    if (!btn) return;
+
+    if (sharing) {
+        btn.classList.add('sharing');
+        btn.innerHTML = '<i class="fa-solid fa-display"></i><span>停止共享</span>';
+        btn.title = '停止屏幕共享';
+    } else {
+        btn.classList.remove('sharing');
+        btn.innerHTML = '<i class="fa-solid fa-display"></i><span>共享屏幕</span>';
+        btn.title = '共享屏幕';
+    }
+}
+
+/**
+ * 显示/隐藏屏幕共享播放器容器
+ */
+function showScreenShareContainer(show, sharerName = '') {
+    // 更改为使用 screen-share-overlay
+    const container = document.getElementById('screen-share-overlay');
+    const nameSpan = container?.querySelector('.sharer-name');
+
+    if (!container) return;
+
+    if (show) {
+        container.style.display = 'flex';
+        // 如果正在播放视频，暂停它
+        if (player && !player.paused()) {
+            player.pause();
+        }
+        if (nameSpan) nameSpan.textContent = sharerName;
+    } else {
+        container.style.display = 'none';
+        const video = document.getElementById('screen-share-video');
+        if (video) video.srcObject = null;
+    }
+}
+
+/**
+ * 处理屏幕共享停止（观看者角度）
+ */
+function handleScreenShareStopped(stoppedBy, reason) {
+    // 关闭 P2P 连接
+    peerConnections.forEach((pc) => pc.close());
+    peerConnections.clear();
+
+    currentSharer = null;
+    showScreenShareContainer(false);
+
+    if (reason === 'disconnected') {
+        showNotification(`${stoppedBy} 断开连接，屏幕共享已结束`);
+    } else {
+        showNotification(`${stoppedBy} 停止了屏幕共享`);
+    }
+}
+
+
+// 全局函数：加入屏幕共享
+window.joinScreenShare = function () {
+    if (isScreenSharing) {
+        showToast('你正在共享屏幕，无法观看自己', 'warning');
+        return;
+    }
+    if (!currentSharer) {
+        showToast('当前无人共享屏幕', 'warning');
+        return;
+    }
+    showScreenShareContainer(true, currentSharer.name);
+    // 如果没有连接，重新请求
+    if (peerConnections.size === 0) {
+        socket.emit('screen-share-request');
+    }
+};
+
+/**
+ * 屏幕共享音量控制
+ */
+function handleScreenShareVolume(e) {
+    const video = document.getElementById('screen-share-video');
+    const volumeIcon = document.getElementById('screen-share-volume-icon');
+    if (!video) return;
+
+    const volume = parseFloat(e.target.value);
+    video.volume = volume;
+    video.muted = (volume === 0);
+
+    // 更新图标
+    if (volume === 0) {
+        volumeIcon.className = 'fa-solid fa-volume-xmark';
+    } else if (volume < 0.5) {
+        volumeIcon.className = 'fa-solid fa-volume-low';
+    } else {
+        volumeIcon.className = 'fa-solid fa-volume-high';
+    }
+}
+
+/**
+ * 切换屏幕共享全屏
+ */
+function toggleScreenShareFullscreen() {
+    const container = document.getElementById('screen-share-overlay');
+    if (!container) return;
+
+    if (!document.fullscreenElement) {
+        container.requestFullscreen().catch(err => {
+            console.error('全屏失败:', err);
+        });
+    } else {
+        document.exitFullscreen();
+    }
+}
+
+/**
+ * 初始化屏幕共享事件监听
+ */
+function initScreenShareListeners() {
+    // 初始化设置弹窗
+    initScreenShareSettingsModal();
+
+    // 共享按钮点击
+    const shareBtn = document.getElementById('screen-share-btn');
+    if (shareBtn) {
+        shareBtn.addEventListener('click', () => {
+            if (isScreenSharing) {
+                stopScreenShare();
+            } else {
+                startScreenShare();
+            }
+        });
+    }
+
+    // 绑定其他控制按钮 (需在 overlay 更新 HTML 后绑定，或者在这里通过 document 代理绑定)
+    // 更新 overlay HTML 结构以包含按钮
+    const overlay = document.getElementById('screen-share-overlay');
+    if (overlay) {
+        const controlsDiv = overlay.querySelector('.screen-share-controls');
+        // 添加音量和全屏按钮
+        if (controlsDiv && !controlsDiv.querySelector('.extra-controls')) {
+            const extraControls = document.createElement('div');
+            extraControls.className = 'extra-controls';
+            extraControls.innerHTML = `
+                <div class="volume-control-group">
+                    <button class="control-btn" id="screen-share-volume-btn" title="静音/取消静音">
+                        <i class="fa-solid fa-volume-high" id="screen-share-volume-icon"></i>
+                    </button>
+                    <input type="range" class="volume-slider" id="screen-share-volume-slider" min="0" max="1" step="0.1" value="1">
+                </div>
+                <button class="control-btn" id="screen-share-fullscreen" title="全屏">
+                    <i class="fa-solid fa-expand"></i>
+                </button>
+             `;
+            // 插入到 sharer-info 后面
+            const sharerInfo = controlsDiv.querySelector('.sharer-info');
+            if (sharerInfo) {
+                sharerInfo.insertAdjacentElement('afterend', extraControls);
+            }
+
+            // 绑定事件
+            document.getElementById('screen-share-volume-slider')?.addEventListener('input', handleScreenShareVolume);
+            const volBtn = document.getElementById('screen-share-volume-btn');
+            if (volBtn) {
+                volBtn.addEventListener('click', () => {
+                    const video = document.getElementById('screen-share-video');
+                    const slider = document.getElementById('screen-share-volume-slider');
+                    if (video && slider) {
+                        video.muted = !video.muted;
+                        if (video.muted) {
+                            slider.value = 0;
+                            handleScreenShareVolume({ target: slider });
+                        } else {
+                            // 如果之前是静音，恢复到上次的音量，或者默认1
+                            slider.value = video.volume > 0 ? video.volume : 1;
+                            handleScreenShareVolume({ target: slider });
+                        }
+                    }
+                });
+            }
+            document.getElementById('screen-share-fullscreen')?.addEventListener('click', toggleScreenShareFullscreen);
+        }
+    }
+
+    // Socket 事件
+    socket.on('screen-share-started', ({ sharerId, sharerName }) => {
+        console.log(`[屏幕共享] 收到 screen-share-started: ${sharerName} (${sharerId})`);
+        currentSharer = { id: sharerId, name: sharerName };
+
+        // 强制刷新用户列表以显示"共享中"徽章
+        // 我们需要最新的用户列表，如果本地没有完整的用户列表对象，可能需要请求服务器
+        // 但通常 userList 应该在本地有缓存吗？ 
+        // 实际上 updateUserList 是在收到 user-update 事件时调用的，参数是 users 数组。
+        // 这里我们没有 users 数组，无法直接调用 updateUserList(users)。
+        // 解决方案：通知服务器广播更新后的用户列表，或者请求更新。
+        socket.emit('request-user-list');
+
+        showNotification(`${sharerName} 开始共享屏幕`);
+        // 请求接收共享
+        socket.emit('screen-share-request');
+        console.log('[屏幕共享] 已发送 screen-share-request');
+    });
+
+    socket.on('screen-share-viewer-joined', ({ viewerId, viewerName }) => {
+        console.log(`[屏幕共享] 收到 screen-share-viewer-joined: ${viewerName} (${viewerId})`);
+        // 分享者收到新观看者，创建 offer
+        if (isScreenSharing) {
+            console.log('[屏幕共享] 正在为观看者创建 offer...');
+            createOfferForViewer(viewerId, viewerName);
+        } else {
+            console.log('[屏幕共享] 警告: 收到 viewer-joined 但未在共享状态');
+        }
+    });
+
+    socket.on('screen-share-offer', ({ sharerId, sharerName, offer }) => {
+        console.log(`[屏幕共享] 收到 screen-share-offer from ${sharerName}`);
+        handleScreenShareOffer(sharerId, sharerName, offer);
+    });
+
+    socket.on('screen-share-answer', ({ viewerId, answer }) => {
+        console.log(`[屏幕共享] 收到 screen-share-answer from ${viewerId}`);
+        handleScreenShareAnswer(viewerId, answer);
+    });
+
+    socket.on('screen-share-ice', ({ fromId, candidate }) => {
+        console.log(`[屏幕共享] 收到 ICE candidate from ${fromId}`);
+        handleScreenShareIce(fromId, candidate);
+    });
+
+    socket.on('screen-share-stopped', ({ stoppedBy, reason }) => {
+        console.log(`[屏幕共享] 收到 screen-share-stopped: ${stoppedBy}, reason: ${reason}`);
+        handleScreenShareStopped(stoppedBy, reason);
+        // 更新用户列表（移除徽章）
+        socket.emit('request-user-list');
+    });
+
+    // 同步用户列表
+    socket.on('sync-user-list', ({ userList }) => {
+        updateUserList(userList);
+    });
+}
+
+// 在 socket 初始化后调用屏幕共享初始化
+const originalInitSocket = initSocket;
+initSocket = function () {
+    originalInitSocket();
+    // 立即初始化屏幕共享监听（不等待 connect 事件，避免竞态）
+    setTimeout(() => {
+        if (socket) {
+            initScreenShareListeners();
+            console.log('[屏幕共享] 事件监听器已初始化');
+        }
+    }, 100);
 };

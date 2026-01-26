@@ -122,6 +122,13 @@ class Room {
 
     // 房主的用户 ID (用于重连恢复权限)
     this.hostUserId = null;
+
+    // 屏幕共享状态
+    this.screenShareState = {
+      isSharing: false,
+      sharerId: null,
+      sharerName: null
+    };
   }
 
   // 检查是否需要密码
@@ -1088,7 +1095,8 @@ io.on('connection', (socket) => {
       videoState: room.videoState,
       userList: room.getUserList(),
       messages: room.messages.slice(-50), // 发送最近50条消息
-      settings: room.settings // 添加房间设置
+      settings: room.settings, // 添加房间设置
+      screenShareState: room.screenShareState // 屏幕共享状态
     });
   });
 
@@ -1338,6 +1346,117 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ============ 屏幕共享 WebRTC 信令 ============
+
+  // 开始屏幕共享
+  socket.on('screen-share-start', (callback) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    // 检查是否已有人在共享
+    if (room.screenShareState.isSharing) {
+      if (callback) callback({
+        success: false,
+        error: `${room.screenShareState.sharerName} 正在共享屏幕`
+      });
+      return;
+    }
+
+    // 记录共享状态
+    room.screenShareState = {
+      isSharing: true,
+      sharerId: socket.id,
+      sharerName: currentUserName
+    };
+
+    // 通知房间内其他用户
+    socket.to(currentRoom).emit('screen-share-started', {
+      sharerId: socket.id,
+      sharerName: currentUserName
+    });
+
+    console.log(`[屏幕共享] ${currentUserName} 在房间 ${currentRoom} 开始共享`);
+
+    if (callback) callback({ success: true });
+  });
+
+  // 转发 SDP Offer (分享者 -> 观看者)
+  socket.on('screen-share-offer', ({ targetId, offer }) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || room.screenShareState.sharerId !== socket.id) return;
+
+    io.to(targetId).emit('screen-share-offer', {
+      sharerId: socket.id,
+      sharerName: currentUserName,
+      offer
+    });
+  });
+
+  // 转发 SDP Answer (观看者 -> 分享者)
+  socket.on('screen-share-answer', ({ targetId, answer }) => {
+    if (!currentRoom) return;
+
+    io.to(targetId).emit('screen-share-answer', {
+      viewerId: socket.id,
+      answer
+    });
+  });
+
+  // 转发 ICE Candidate
+  socket.on('screen-share-ice', ({ targetId, candidate }) => {
+    if (!currentRoom) return;
+
+    io.to(targetId).emit('screen-share-ice', {
+      fromId: socket.id,
+      candidate
+    });
+  });
+
+  // 停止屏幕共享
+  socket.on('screen-share-stop', (callback) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || !room.screenShareState.isSharing || room.screenShareState.sharerId !== socket.id) {
+      return;
+    }
+
+    room.screenShareState = { isSharing: false, sharerId: null, sharerName: null };
+
+    // 通知所有人
+    io.to(currentRoom).emit('screen-share-stopped', {
+      stoppedBy: currentUserName,
+      reason: 'user_stopped'
+    });
+
+    if (callback) callback({ success: true });
+  });
+
+  // 观看者请求接收屏幕共享
+  socket.on('screen-share-request', () => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || !room.screenShareState.isSharing) return;
+
+    // 通知分享者有新观看者加入
+    io.to(room.screenShareState.sharerId).emit('screen-share-viewer-joined', {
+      viewerId: socket.id,
+      viewerName: currentUserName
+    });
+  });
+
+  // 请求同步用户列表 (用于 UI 状态刷新)
+  socket.on('request-user-list', () => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    socket.emit('sync-user-list', {
+      userList: room.getUserList()
+    });
+  });
+
   // 用户断开连接
   socket.on('disconnect', () => {
     console.log(`用户断开: ${socket.id}`);
@@ -1346,6 +1465,20 @@ io.on('connection', (socket) => {
       const room = rooms.get(currentRoom);
       if (room) {
         room.removeUser(socket.id);
+
+        // 如果断开的用户正在共享屏幕，停止共享
+        if (room.screenShareState.sharerId === socket.id) {
+          room.screenShareState = {
+            isSharing: false,
+            sharerId: null,
+            sharerName: null
+          };
+          socket.to(currentRoom).emit('screen-share-stopped', {
+            stoppedBy: currentUserName,
+            reason: 'disconnected'
+          });
+          console.log(`[屏幕共享] ${currentUserName} 断开连接，共享已停止`);
+        }
 
         // 通知其他用户
         socket.to(currentRoom).emit('user-left', {
