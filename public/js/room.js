@@ -27,9 +27,15 @@ let isScreenSharing = false;       // 是否正在共享
 let currentSharer = null;          // 当前共享者信息 { id, name }
 const rtcConfig = {
     iceServers: [
+        // 国内可访问的 STUN 服务器
+        { urls: 'stun:stun.miwifi.com:3478' },      // 小米
+        { urls: 'stun:stun.qq.com:3478' },          // 腾讯
+        // 国际 STUN 服务器（备用）
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun.stunprotocol.org:3478' }
+    ],
+    iceCandidatePoolSize: 10  // 预先收集 ICE 候选，加速连接
 };
 
 // ==========================================
@@ -2722,12 +2728,39 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
         if (video && event.streams[0]) {
             video.srcObject = event.streams[0];
             showScreenShareContainer(true, sharerName);
+            // 清除超时定时器
+            if (pc._connectionTimeout) {
+                clearTimeout(pc._connectionTimeout);
+                pc._connectionTimeout = null;
+            }
         }
     };
 
     pc.onconnectionstatechange = () => {
         console.log(`[屏幕共享] 与分享者连接状态: ${pc.connectionState}`);
+
+        if (pc.connectionState === 'failed') {
+            showToast('P2P 连接失败，可能是网络限制，请尝试刷新页面', 'error');
+            showScreenShareContainer(false);
+            peerConnections.delete(sharerId);
+            pc.close();
+        } else if (pc.connectionState === 'disconnected') {
+            showToast('屏幕共享连接已断开', 'warning');
+        } else if (pc.connectionState === 'connected') {
+            showToast('屏幕共享连接成功', 'success');
+        }
     };
+
+    // 连接超时检测（15秒）
+    pc._connectionTimeout = setTimeout(() => {
+        if (pc.connectionState !== 'connected' && pc.connectionState !== 'completed') {
+            console.warn('[屏幕共享] 连接超时');
+            showToast('P2P 连接超时，可能是网络环境不支持直连', 'error');
+            showScreenShareContainer(false);
+            peerConnections.delete(sharerId);
+            pc.close();
+        }
+    }, 15000);
 
     try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
