@@ -16,6 +16,24 @@ function showToast(message, type = 'info') {
 // Socket.io 连接
 const socket = io();
 
+// 监听房间列表实时更新
+socket.on('room-list-update', (data) => {
+    // 只有在首页大厅时才更新 UI
+    const roomList = document.getElementById('room-list');
+    if (!roomList) return;
+
+    if (!data.rooms || data.rooms.length === 0) {
+        roomList.innerHTML = '<div class="room-list-empty"><i class="fa-solid fa-couch"></i><p>暂无公开放映室</p><span>创建一个放映室，邀请朋友一起观看吧！</span></div>';
+        return;
+    }
+
+    roomList.innerHTML = '';
+    data.rooms.forEach(room => {
+        const card = createRoomCard(room);
+        roomList.appendChild(card);
+    });
+});
+
 // DOM 元素
 const createForm = document.getElementById('create-form');
 const joinForm = document.getElementById('join-form');

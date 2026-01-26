@@ -473,6 +473,31 @@ app.get('/api/rooms', (req, res) => {
   });
 });
 
+// 广播房间列表更新
+function broadcastRoomUpdate() {
+  const roomList = [];
+  rooms.forEach((room, id) => {
+    // 只显示有用户的房间
+    if (room.users.size > 0) {
+      roomList.push({
+        id,
+        name: room.name,
+        hostName: room.hostName,
+        userCount: room.users.size,
+        hasPassword: room.hasPassword,
+        createdAt: room.createdAt
+      });
+    }
+  });
+
+  // 按创建时间倒序排序
+  roomList.sort((a, b) => b.createdAt - a.createdAt);
+
+  io.emit('room-list-update', {
+    rooms: roomList
+  });
+}
+
 // ============ B 站相关 API ============
 const bilibili = require('./bilibili');
 
@@ -1030,6 +1055,10 @@ io.on('connection', (socket) => {
       roomId,
       isHost: true
     });
+
+    // 广播房间列表更新
+    broadcastRoomUpdate();
+
   });
 
   // 加入房间
@@ -1098,6 +1127,10 @@ io.on('connection', (socket) => {
       settings: room.settings, // 添加房间设置
       screenShareState: room.screenShareState // 屏幕共享状态
     });
+
+    // 广播房间列表更新 (因为人数变了)
+    broadcastRoomUpdate();
+
   });
 
   // 更换视频源
@@ -1487,6 +1520,10 @@ io.on('connection', (socket) => {
           userList: room.getUserList()
         });
 
+        // 广播房间列表更新 (因为人数变了)
+        broadcastRoomUpdate();
+
+
         // 如果房间空了，延迟删除房间
         if (room.users.size === 0) {
           setTimeout(() => {
@@ -1546,6 +1583,8 @@ io.on('connection', (socket) => {
 
               rooms.delete(currentRoom);
               console.log(`房间 ${currentRoom} 已删除（无人）`);
+              // 广播房间列表更新 (房间被删除了)
+              broadcastRoomUpdate();
             }
           }, 600000); // 10分钟后删除空房间，防止网络波动导致房间消失
         }
