@@ -1241,6 +1241,7 @@ function uploadVideo(file) {
     const uploadProgress = document.getElementById('upload-progress');
     const progressFill = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
+    const progressPercent = document.getElementById('progress-percent');
     const transcodeOverlay = document.getElementById('transcode-overlay');
 
     // 禁用上传按钮
@@ -1251,6 +1252,7 @@ function uploadVideo(file) {
     uploadProgress.style.display = 'flex';
     progressFill.style.width = '0%';
     progressText.textContent = '准备上传...';
+    if (progressPercent) progressPercent.textContent = '0%';
 
     const formData = new FormData();
     formData.append('video', file);
@@ -1262,7 +1264,8 @@ function uploadVideo(file) {
         if (e.lengthComputable) {
             const percent = Math.round((e.loaded / e.total) * 100);
             progressFill.style.width = `${percent}%`;
-            progressText.textContent = `上传中... ${percent}%`;
+            progressText.textContent = '上传中...';
+            if (progressPercent) progressPercent.textContent = `${percent}%`;
 
             // 上传完成后显示转码提示
             if (percent === 100) {
@@ -1283,6 +1286,7 @@ function uploadVideo(file) {
                 if (response.success) {
                     progressFill.style.width = '100%';
                     progressText.textContent = '处理完成！';
+                    if (progressPercent) progressPercent.textContent = '100%';
                     showToast(`视频 "${response.filename}" 上传成功`, 'success');
 
                     // 通知所有人更换视频

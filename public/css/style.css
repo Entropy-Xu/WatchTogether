@@ -3091,13 +3091,14 @@ input::placeholder {
 
 .bilibili-progress-container .progress-bar-bg {
   width: 100%;
-  height: 6px;
+  height: 8px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
   /* 关键：确保内部不溢出 */
   position: relative;
   /* 确保定位上下文 */
+  flex: none;
 }
 
 .bilibili-progress-container .progress-bar-fill {
@@ -3105,9 +3106,34 @@ input::placeholder {
   width: 0%;
   /* 初始宽度 */
   background: linear-gradient(90deg, #00b5e5 0%, #23c9ff 100%);
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.2s ease-out;
   box-shadow: 0 0 8px rgba(0, 181, 229, 0.3);
+  position: relative;
+}
+
+/* Stripes Animation for Bilibili */
+.bilibili-progress-container .progress-bar-fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.15) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 1rem 1rem;
+  animation: progress-stripes 1s linear infinite;
+  z-index: 1;
+}
 }
 
 /* 响应式 */
