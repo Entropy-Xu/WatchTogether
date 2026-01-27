@@ -75,20 +75,25 @@
 
       <!-- 视频播放区域 -->
       <div class="video-section">
-        <!-- 视频源输入区域 (Tabbed) -->
-        <div class="video-input-tabs">
-          <button class="input-tab active" data-target="tab-direct">
-            <i class="fa-solid fa-link"></i> 链接/上传
-          </button>
-          <button class="input-tab" data-target="tab-bilibili">
-            <i class="fa-brands fa-bilibili"></i> B站
-          </button>
-          <button class="input-tab" data-target="tab-parser">
-            <i class="fa-solid fa-globe"></i> 解析
-          </button>
-        </div>
-
         <div class="video-url-bar">
+          <!-- 视频源输入区域 (Tabbed) -->
+          <div class="video-url-header">
+            <div class="video-input-tabs">
+              <button class="input-tab active" data-target="tab-direct">
+                <i class="fa-solid fa-link"></i> 链接/上传
+              </button>
+              <button class="input-tab" data-target="tab-bilibili">
+                <i class="fa-brands fa-bilibili"></i> B站
+              </button>
+              <button class="input-tab" data-target="tab-parser">
+                <i class="fa-solid fa-globe"></i> 解析
+              </button>
+            </div>
+            <button class="input-collapse-btn" id="toggle-input-btn" title="隐藏输入栏" aria-expanded="true">
+              <i class="fa-solid fa-chevron-up"></i>
+            </button>
+          </div>
+
           <!-- Tab 1: 直链 & 上传 -->
           <div class="input-tab-content active" id="tab-direct">
             <div class="input-action-container">
@@ -242,10 +247,12 @@
           <div class="custom-controls" id="custom-controls">
             <!-- Progress Bar -->
             <div class="progress-container" id="progress-container">
-              <div class="progress-bar-bg"></div>
-              <div class="progress-bar-buffered" id="progress-buffered"></div>
-              <div class="progress-bar-current" id="progress-current">
-                <div class="progress-handle"></div>
+              <div class="progress-track" id="progress-track">
+                <div class="progress-bar-bg"></div>
+                <div class="progress-bar-buffered" id="progress-buffered"></div>
+                <div class="progress-bar-current" id="progress-current">
+                  <div class="progress-handle"></div>
+                </div>
               </div>
             </div>
 

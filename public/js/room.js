@@ -8,6 +8,7 @@
 
 let socket = null;
 let player = null;
+let customControlsInitialized = false;
 let roomId = null;
 let userName = null;
 let isHost = false;
@@ -166,6 +167,7 @@ function showProcessingCard(fileName) {
     const card = document.getElementById('processing-card');
     const inputGroup = document.querySelector('#tab-direct .main-input-group');
     const videoInput = document.getElementById('video-url-input');
+    const videoUrlBar = document.querySelector('.video-url-bar');
 
     if (!card) return;
 
@@ -188,6 +190,7 @@ function showProcessingCard(fileName) {
     // 锁定输入框
     if (inputGroup) inputGroup.classList.add('locked');
     if (videoInput) videoInput.value = truncateFileName(fileName, 40);
+    if (videoUrlBar) videoUrlBar.classList.add('is-uploading');
 }
 
 /**
@@ -313,6 +316,7 @@ function updateProcessingUI({ icon, title, status, message, progress }) {
 function hideProcessingCard() {
     const card = document.getElementById('processing-card');
     const inputGroup = document.querySelector('#tab-direct .main-input-group');
+    const videoUrlBar = document.querySelector('.video-url-bar');
 
     if (card) {
         card.style.display = 'none';
@@ -321,6 +325,7 @@ function hideProcessingCard() {
 
     // 解锁输入框
     if (inputGroup) inputGroup.classList.remove('locked');
+    if (videoUrlBar) videoUrlBar.classList.remove('is-uploading');
 
     currentProcessingState.active = false;
     currentProcessingState.phase = 'idle';
@@ -2164,6 +2169,9 @@ function initDanmakuSystem() {
 
 // 自定义控件逻辑
 function initCustomControls() {
+    if (!player || customControlsInitialized) return;
+    customControlsInitialized = true;
+
     const controls = document.getElementById('custom-controls');
     const playBtn = document.getElementById('play-pause-btn');
     const volumeBtn = document.getElementById('volume-btn');
@@ -2171,6 +2179,7 @@ function initCustomControls() {
     const speedMenu = document.querySelector('.speed-menu');
     const fullscreenBtn = document.getElementById('fullscreen-btn');
     const progressContainer = document.getElementById('progress-container');
+    const progressTrack = document.getElementById('progress-track');
     const progressBarCurrent = document.getElementById('progress-current');
     const progressBarBuffered = document.getElementById('progress-buffered');
     const currentTimeEl = document.getElementById('current-time');
@@ -2218,8 +2227,9 @@ function initCustomControls() {
             showToast('只有房主可以控制播放进度', 'error');
             return;
         }
-        const rect = progressContainer.getBoundingClientRect();
-        const pos = (e.clientX - rect.left) / rect.width;
+        const rect = (progressTrack || progressContainer).getBoundingClientRect();
+        const clampedX = Math.min(Math.max(e.clientX, rect.left), rect.right);
+        const pos = (clampedX - rect.left) / rect.width;
         player.currentTime(pos * player.duration());
     });
 
@@ -2969,6 +2979,27 @@ function initTabListeners() {
     });
 }
 
+// Collapse input area (keep tabs only)
+function initInputCollapseToggle() {
+    const toggleBtn = document.getElementById('toggle-input-btn');
+    const videoUrlBar = document.querySelector('.video-url-bar');
+
+    if (!toggleBtn || !videoUrlBar) return;
+
+    const updateState = () => {
+        const isCollapsed = videoUrlBar.classList.contains('is-collapsed');
+        toggleBtn.setAttribute('aria-expanded', (!isCollapsed).toString());
+        toggleBtn.title = isCollapsed ? '展开输入栏' : '隐藏输入栏';
+    };
+
+    toggleBtn.addEventListener('click', () => {
+        videoUrlBar.classList.toggle('is-collapsed');
+        updateState();
+    });
+
+    updateState();
+}
+
 // Initialize everything when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     initPermissionListeners();
@@ -2976,6 +3007,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initBilibiliFeatures();
     initVideoParser(); // Renamed from initParserFeatures to match existing function name
     initTabListeners(); // Add tab listeners
+    initInputCollapseToggle();
 });
 
 // 在 startRoom 中初始化 B 站功能
