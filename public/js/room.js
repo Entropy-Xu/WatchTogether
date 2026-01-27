@@ -147,6 +147,378 @@ function updatePlayerControls() {
 }
 
 // ==========================================
+// 统一处理卡片 (上传 + 转码)
+// ==========================================
+
+// 当前处理状态
+let currentProcessingState = {
+    active: false,
+    phase: 'idle', // 'uploading' | 'transcoding' | 'complete' | 'error'
+    fileName: '',
+    xhr: null // 用于取消上传
+};
+
+/**
+ * 显示处理卡片
+ * @param {string} fileName - 文件名
+ */
+function showProcessingCard(fileName) {
+    const card = document.getElementById('processing-card');
+    const inputGroup = document.querySelector('#tab-direct .main-input-group');
+    const videoInput = document.getElementById('video-url-input');
+
+    if (!card) return;
+
+    currentProcessingState.active = true;
+    currentProcessingState.fileName = fileName;
+
+    // 重置状态
+    card.className = 'processing-card uploading';
+    card.style.display = 'block';
+
+    // 更新显示
+    updateProcessingUI({
+        icon: 'fa-cloud-arrow-up',
+        title: truncateFileName(fileName, 30),
+        status: '0%',
+        message: '准备上传...',
+        progress: 0
+    });
+
+    // 锁定输入框
+    if (inputGroup) inputGroup.classList.add('locked');
+    if (videoInput) videoInput.value = truncateFileName(fileName, 40);
+}
+
+/**
+ * 更新处理卡片
+ * @param {string} phase - 阶段: 'upload' | 'transcode'
+ * @param {Object} data - 进度数据
+ */
+function updateProcessingCard(phase, data) {
+    const card = document.getElementById('processing-card');
+    if (!card) return;
+
+    if (phase === 'upload') {
+        currentProcessingState.phase = 'uploading';
+        card.className = 'processing-card uploading';
+        
+        updateProcessingUI({
+            icon: 'fa-cloud-arrow-up',
+            title: truncateFileName(currentProcessingState.fileName, 30),
+            status: `${data.percent}%`,
+            message: data.percent < 100 ? '正在上传视频...' : '上传完成，等待处理...',
+            progress: data.percent
+        });
+
+        // 上传完成后准备转码
+        if (data.percent >= 100) {
+            currentProcessingState.phase = 'transcoding';
+            card.className = 'processing-card transcoding';
+            updateProcessingUI({
+                icon: 'fa-video',
+                title: truncateFileName(currentProcessingState.fileName, 30),
+                status: '准备中',
+                message: '正在准备处理视频...',
+                progress: 0
+            });
+        }
+    } else if (phase === 'transcode') {
+        // 确保卡片可见
+        card.style.display = 'block';
+        currentProcessingState.phase = 'transcoding';
+        
+        const stageText = {
+            'analyzing': '分析中',
+            'transcoding': '转码中',
+            'merging': '合并中',
+            'complete': '已完成',
+            'error': '失败'
+        };
+
+        let message = data.message || '';
+        if (data.stage === 'analyzing') {
+            message = '正在分析视频信息...';
+        } else if (data.stage === 'transcoding' && data.segmentInfo) {
+            message = `转码中 (${data.segmentInfo.completed}/${data.segmentInfo.total})`;
+        } else if (data.stage === 'merging') {
+            message = '正在合并视频片段...';
+        } else if (data.stage === 'complete') {
+            message = '处理完成！';
+        }
+
+        let statusText = stageText[data.stage] || data.stage;
+        if (data.progress > 0 && data.stage !== 'complete') {
+            statusText = `${data.progress}%`;
+        }
+
+        if (data.stage === 'complete') {
+            card.className = 'processing-card complete';
+            updateProcessingUI({
+                icon: 'fa-circle-check',
+                title: truncateFileName(currentProcessingState.fileName, 30),
+                status: '完成',
+                message: '视频处理完成，即将播放！',
+                progress: 100
+            });
+            
+            // 延迟隐藏
+            setTimeout(() => hideProcessingCard(), 2000);
+        } else if (data.stage === 'error') {
+            card.className = 'processing-card error';
+            updateProcessingUI({
+                icon: 'fa-circle-exclamation',
+                title: truncateFileName(currentProcessingState.fileName, 30),
+                status: '失败',
+                message: data.message || '处理失败，请重试',
+                progress: data.progress
+            });
+            
+            setTimeout(() => hideProcessingCard(), 3000);
+        } else {
+            card.className = 'processing-card transcoding';
+            updateProcessingUI({
+                icon: 'fa-video',
+                title: truncateFileName(currentProcessingState.fileName, 30),
+                status: statusText,
+                message: message,
+                progress: data.progress
+            });
+        }
+    }
+}
+
+/**
+ * 更新处理卡片UI元素
+ */
+function updateProcessingUI({ icon, title, status, message, progress }) {
+    const iconEl = document.getElementById('processing-icon');
+    const titleEl = document.getElementById('processing-title');
+    const statusEl = document.getElementById('processing-status');
+    const messageEl = document.getElementById('processing-message');
+    const progressEl = document.getElementById('processing-progress-bar');
+
+    if (iconEl) {
+        iconEl.className = `fa-solid ${icon} processing-icon-inner`;
+    }
+    if (titleEl) titleEl.textContent = title;
+    if (statusEl) statusEl.textContent = status;
+    if (messageEl) messageEl.textContent = message;
+    if (progressEl) progressEl.style.width = `${progress}%`;
+}
+
+/**
+ * 隐藏处理卡片
+ */
+function hideProcessingCard() {
+    const card = document.getElementById('processing-card');
+    const inputGroup = document.querySelector('#tab-direct .main-input-group');
+
+    if (card) {
+        card.style.display = 'none';
+        card.className = 'processing-card';
+    }
+
+    // 解锁输入框
+    if (inputGroup) inputGroup.classList.remove('locked');
+
+    currentProcessingState.active = false;
+    currentProcessingState.phase = 'idle';
+    currentProcessingState.xhr = null;
+}
+
+/**
+ * 取消当前处理
+ */
+function cancelProcessing() {
+    if (currentProcessingState.xhr) {
+        currentProcessingState.xhr.abort();
+        showToast('已取消上传', 'info');
+    }
+    hideProcessingCard();
+}
+
+/**
+ * 截断文件名，保留首尾
+ */
+function truncateFileName(name, maxLen) {
+    if (!name || name.length <= maxLen) return name;
+    const ext = name.lastIndexOf('.') > 0 ? name.substring(name.lastIndexOf('.')) : '';
+    const baseName = name.substring(0, name.length - ext.length);
+    const keepLen = Math.floor((maxLen - 3 - ext.length) / 2);
+    return baseName.substring(0, keepLen) + '...' + baseName.substring(baseName.length - keepLen) + ext;
+}
+
+// ==========================================
+// B站进度卡片
+// ==========================================
+
+/**
+ * 更新B站下载进度
+ */
+function updateBilibiliProgress(data) {
+    const container = document.getElementById('bilibili-progress-container');
+    const progressBar = document.getElementById('bilibili-progress-bar');
+    const progressText = document.getElementById('bilibili-progress-text');
+    const progressPercent = document.getElementById('bilibili-progress-percent');
+    const progressMessage = document.getElementById('bilibili-progress-message');
+    const icon = document.getElementById('bilibili-processing-icon');
+
+    if (!container) return;
+
+    // 更新进度条
+    if (progressBar) {
+        progressBar.style.width = `${data.progress}%`;
+    }
+
+    // 更新状态文字
+    if (progressPercent) {
+        progressPercent.textContent = `${data.progress}%`;
+    }
+
+    // 生成友好消息
+    let friendlyMessage = data.message || '正在下载...';
+    let titleText = '下载中...';
+    
+    if (data.progress < 30) {
+        titleText = '获取视频流...';
+        friendlyMessage = '正在获取视频资源...';
+    } else if (data.progress < 80) {
+        titleText = '下载中...';
+        friendlyMessage = `正在下载视频 (${data.progress}%)`;
+    } else if (data.progress < 100) {
+        titleText = '即将完成...';
+        friendlyMessage = '正在处理视频数据...';
+    } else {
+        titleText = '准备播放';
+        friendlyMessage = '下载完成，即将播放！';
+        container.classList.add('complete');
+        if (icon) icon.className = 'fa-solid fa-circle-check processing-icon-inner';
+    }
+
+    if (progressText) progressText.textContent = titleText;
+    if (progressMessage) progressMessage.textContent = friendlyMessage;
+
+    console.log(`[B站下载] 进度已更新: ${data.progress}%`);
+}
+
+/**
+ * 显示B站进度卡片
+ */
+function showBilibiliProgress(videoTitle) {
+    const container = document.getElementById('bilibili-progress-container');
+    const progressBar = document.getElementById('bilibili-progress-bar');
+    const progressText = document.getElementById('bilibili-progress-text');
+    const progressPercent = document.getElementById('bilibili-progress-percent');
+    const progressMessage = document.getElementById('bilibili-progress-message');
+    const icon = document.getElementById('bilibili-processing-icon');
+
+    if (container) {
+        container.style.display = 'block';
+        container.classList.remove('complete', 'error');
+    }
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.textContent = truncateFileName(videoTitle || '准备下载...', 25);
+    if (progressPercent) progressPercent.textContent = '0%';
+    if (progressMessage) progressMessage.textContent = '正在获取视频流...';
+    if (icon) icon.className = 'fa-brands fa-bilibili processing-icon-inner';
+}
+
+/**
+ * 隐藏B站进度卡片
+ */
+function hideBilibiliProgress() {
+    const container = document.getElementById('bilibili-progress-container');
+    if (container) {
+        container.style.display = 'none';
+        container.classList.remove('complete', 'error');
+    }
+}
+
+// ==========================================
+// 解析进度卡片
+// ==========================================
+
+/**
+ * 显示解析进度卡片
+ */
+function showParserProgress(show, title) {
+    const container = document.getElementById('parser-progress-container');
+    const inputGroup = document.querySelector('#tab-parser .main-input-group');
+    const progressText = document.getElementById('parser-progress-text');
+    const progressMessage = document.getElementById('parser-progress-message');
+    const progressPercent = document.getElementById('parser-progress-percent');
+    const progressBar = document.getElementById('parser-progress-bar');
+    const icon = document.getElementById('parser-processing-icon');
+
+    if (container) {
+        container.style.display = show ? 'flex' : 'none';
+        container.classList.remove('complete', 'error');
+    }
+
+    if (show) {
+        if (inputGroup) inputGroup.classList.add('locked');
+        if (progressText) progressText.textContent = truncateFileName(title || '解析中...', 30);
+        if (progressMessage) progressMessage.textContent = '正在分析视频链接...';
+        if (progressPercent) progressPercent.textContent = '0%';
+        if (progressBar) progressBar.style.width = '0%';
+        if (icon) icon.className = 'fa-solid fa-globe processing-icon-inner';
+    } else {
+        if (inputGroup) inputGroup.classList.remove('locked');
+    }
+}
+
+/**
+ * 更新解析进度
+ */
+function updateParserProgress(percent, message, stage) {
+    const container = document.getElementById('parser-progress-container');
+    const bar = document.getElementById('parser-progress-bar');
+    const text = document.getElementById('parser-progress-text');
+    const percentText = document.getElementById('parser-progress-percent');
+    const messageEl = document.getElementById('parser-progress-message');
+    const icon = document.getElementById('parser-processing-icon');
+
+    if (bar) {
+        bar.style.width = `${percent}%`;
+    }
+    
+    if (percentText) {
+        percentText.textContent = `${percent}%`;
+    }
+
+    // 根据阶段显示不同内容
+    let titleText = '解析中...';
+    let friendlyMessage = message || '正在处理...';
+    
+    if (stage === 'fetching' || percent < 30) {
+        titleText = '获取页面...';
+        friendlyMessage = '正在获取视频页面...';
+    } else if (stage === 'extracting' || percent < 60) {
+        titleText = '提取信息...';
+        friendlyMessage = '正在提取视频信息...';
+    } else if (stage === 'downloading' || percent < 90) {
+        titleText = '下载中...';
+        friendlyMessage = message || '正在下载视频...';
+    } else if (percent >= 100) {
+        titleText = '完成';
+        friendlyMessage = '解析完成！';
+        if (container) container.classList.add('complete');
+        if (icon) icon.className = 'fa-solid fa-circle-check processing-icon-inner';
+    }
+
+    // 错误处理
+    if (message && (message.includes('失败') || message.includes('错误') || message.includes('Error'))) {
+        if (container) container.classList.add('error');
+        if (icon) icon.className = 'fa-solid fa-circle-exclamation processing-icon-inner';
+        titleText = '解析失败';
+    }
+
+    if (text) text.textContent = titleText;
+    if (messageEl) messageEl.textContent = friendlyMessage;
+}
+
+// ==========================================
 // 初始化
 // ==========================================
 
@@ -428,85 +800,14 @@ function initSocket() {
 
     // 转码进度
     socket.on('transcode-progress', (data) => {
-        const transcodeOverlay = document.getElementById('transcode-overlay');
-        const transcodeStatus = document.getElementById('transcode-status');
-        const transcodeProgress = document.getElementById('transcode-progress-bar');
-        const transcodeMessage = document.getElementById('transcode-message');
-
-        if (!transcodeOverlay) return;
-
-        // 显示转码覆盖层
-        if (data.stage !== 'complete') {
-            transcodeOverlay.style.display = 'flex';
-        }
-
-        // 更新状态文本
-        const stageText = {
-            'analyzing': '分析中',
-            'transcoding': '转码中',
-            'merging': '合并中',
-            'complete': '完成',
-            'error': '出错'
-        };
-
-        if (transcodeStatus) {
-            let statusHtml = `<span class="stage">${stageText[data.stage] || data.stage}</span>`;
-            if (data.segmentInfo) {
-                statusHtml += ` <span class="segment-info">(${data.segmentInfo.completed}/${data.segmentInfo.total})</span>`;
-            }
-            transcodeStatus.innerHTML = statusHtml;
-        }
-
-        // 更新进度条
-        if (transcodeProgress) {
-            transcodeProgress.style.width = `${data.progress}%`;
-            transcodeProgress.setAttribute('data-progress', `${data.progress}%`);
-        }
-
-        // 更新消息
-        if (transcodeMessage) {
-            transcodeMessage.textContent = data.message || '';
-        }
-
-        // 完成时隐藏
-        if (data.stage === 'complete') {
-            setTimeout(() => {
-                transcodeOverlay.style.display = 'none';
-            }, 1500);
-        }
-
+        updateProcessingCard('transcode', data);
         console.log(`[转码进度] ${data.stage}: ${data.progress}% - ${data.message}`);
     });
 
     // B 站下载进度
     socket.on('bilibili-download-progress', (data) => {
         console.log('[B站下载] 收到进度事件:', data);
-
-        const progressContainer = document.getElementById('bilibili-progress-container');
-        const progressBar = document.getElementById('bilibili-progress-bar');
-        const progressText = document.getElementById('bilibili-progress-text');
-        const progressPercent = document.getElementById('bilibili-progress-percent');
-
-        if (!progressContainer) {
-            console.warn('[B站下载] 进度条容器不存在');
-            return;
-        }
-
-        // 更新进度条
-        if (progressBar) {
-            progressBar.style.width = `${data.progress}%`;
-        }
-
-        // 更新文本
-        if (progressText) {
-            progressText.textContent = data.message || '';
-        }
-
-        if (progressPercent) {
-            progressPercent.textContent = `${data.progress}%`;
-        }
-
-        console.log(`[B站下载] 进度已更新: ${data.progress}%`);
+        updateBilibiliProgress(data);
     });
 
     // 房间设置更新
@@ -1119,7 +1420,17 @@ function initEventListeners() {
         }
 
         uploadVideo(file);
+        // 清空 input 以便同一文件可以再次选择
+        e.target.value = '';
     });
+
+    // 处理卡片取消按钮
+    const processingCancelBtn = document.getElementById('processing-cancel-btn');
+    if (processingCancelBtn) {
+        processingCancelBtn.addEventListener('click', () => {
+            cancelProcessing();
+        });
+    }
 
     // 字幕上传按钮点击
     document.getElementById('upload-subtitle-btn').addEventListener('click', () => {
@@ -1238,89 +1549,79 @@ function uploadSubtitle(file) {
 
 function uploadVideo(file) {
     const uploadBtn = document.getElementById('upload-video-btn');
-    const uploadProgress = document.getElementById('upload-progress');
-    const progressFill = document.getElementById('progress-fill');
-    const progressText = document.getElementById('progress-text');
-    const progressPercent = document.getElementById('progress-percent');
-    const transcodeOverlay = document.getElementById('transcode-overlay');
 
     // 禁用上传按钮
     uploadBtn.disabled = true;
-    // uploadBtn.querySelector('span:last-child').textContent = '上传中...';
 
-    // 显示进度条
-    uploadProgress.style.display = 'flex';
-    progressFill.style.width = '0%';
-    progressText.textContent = '准备上传...';
-    if (progressPercent) progressPercent.textContent = '0%';
+    // 显示统一处理卡片
+    showProcessingCard(file.name);
 
     const formData = new FormData();
     formData.append('video', file);
 
     const xhr = new XMLHttpRequest();
+    currentProcessingState.xhr = xhr;
 
     // 上传进度
     xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
             const percent = Math.round((e.loaded / e.total) * 100);
-            progressFill.style.width = `${percent}%`;
-            progressText.textContent = '上传中...';
-            if (progressPercent) progressPercent.textContent = `${percent}%`;
-
-            // 上传完成后显示转码提示
-            if (percent === 100) {
-                progressText.textContent = '上传完成，等待服务器处理...';
-                transcodeOverlay.style.display = 'flex';
-            }
+            updateProcessingCard('upload', { percent });
         }
     });
 
     // 上传完成
     xhr.addEventListener('load', () => {
-        // 隐藏转码提示
-        transcodeOverlay.style.display = 'none';
-
         if (xhr.status === 200) {
             try {
                 const response = JSON.parse(xhr.responseText);
                 if (response.success) {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '处理完成！';
-                    if (progressPercent) progressPercent.textContent = '100%';
                     showToast(`视频 "${response.filename}" 上传成功`, 'success');
+
+                    // 更新输入框显示文件名
+                    const videoInput = document.getElementById('video-url-input');
+                    if (videoInput) {
+                        videoInput.value = response.filename || truncateFileName(file.name, 40);
+                    }
 
                     // 通知所有人更换视频
                     socket.emit('change-video', { url: response.url });
 
-                    // 隐藏进度条
+                    // 如果没有转码事件，直接完成
                     setTimeout(() => {
-                        uploadProgress.style.display = 'none';
-                    }, 2000);
+                        if (currentProcessingState.phase === 'transcoding' || currentProcessingState.phase === 'uploading') {
+                            // 可能是直接可播放的格式，标记完成
+                            updateProcessingCard('transcode', { stage: 'complete', progress: 100 });
+                        }
+                    }, 3000);
                 } else {
                     showToast(response.error || '上传失败', 'error');
-                    uploadProgress.style.display = 'none';
+                    updateProcessingCard('transcode', { stage: 'error', progress: 0, message: response.error || '上传失败' });
                 }
             } catch {
                 showToast('上传响应解析失败', 'error');
-                uploadProgress.style.display = 'none';
+                hideProcessingCard();
             }
         } else {
             showToast('上传失败，请重试', 'error');
-            uploadProgress.style.display = 'none';
+            updateProcessingCard('transcode', { stage: 'error', progress: 0, message: '上传失败' });
         }
 
         // 恢复按钮状态
         uploadBtn.disabled = false;
-        // uploadBtn.querySelector('span:last-child').textContent = '上传文件';
     });
 
     // 上传错误
     xhr.addEventListener('error', () => {
         showToast('网络错误，上传失败', 'error');
-        uploadProgress.style.display = 'none';
-        transcodeOverlay.style.display = 'none';
+        updateProcessingCard('transcode', { stage: 'error', progress: 0, message: '网络错误' });
         uploadBtn.disabled = false;
-        // uploadBtn.querySelector('span:last-child').textContent = '上传文件';
+    });
+
+    // 上传取消
+    xhr.addEventListener('abort', () => {
+        hideProcessingCard();
+        uploadBtn.disabled = false;
     });
 
     // 发送请求
@@ -2456,21 +2757,14 @@ async function playBilibiliVideo() {
     }
 
     const playBtn = document.getElementById('bilibili-play-btn');
-    const progressContainer = document.getElementById('bilibili-progress-container');
-    const progressBar = document.getElementById('bilibili-progress-bar');
-    const progressText = document.getElementById('bilibili-progress-text');
-    const progressPercent = document.getElementById('bilibili-progress-percent');
     const qn = document.getElementById('bilibili-quality-select').value;
     const cid = document.getElementById('bilibili-page-select').value;
 
     playBtn.disabled = true;
     playBtn.style.display = 'none';
 
-    // 显示进度条
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressText.textContent = '准备下载...';
-    progressPercent.textContent = '0%';
+    // 显示进度卡片
+    showBilibiliProgress(bilibiliVideoInfo.title);
 
     try {
         // 调用后端下载 API
@@ -2491,8 +2785,8 @@ async function playBilibiliVideo() {
             throw new Error(result.error || '下载失败');
         }
 
-        // 隐藏进度条
-        progressContainer.style.display = 'none';
+        // 隐藏进度卡片
+        hideBilibiliProgress();
 
         // 关闭弹窗
         closeBilibiliVideoModal();
@@ -2517,8 +2811,8 @@ async function playBilibiliVideo() {
 
     } catch (err) {
         showToast(`播放失败: ${err.message}`, 'error');
-        // 出错时隐藏进度条
-        progressContainer.style.display = 'none';
+        // 出错时隐藏进度卡片
+        hideBilibiliProgress();
     } finally {
         playBtn.disabled = false;
         playBtn.style.display = 'flex';
@@ -2783,9 +3077,16 @@ async function parseVideoUrl() {
         return;
     }
 
+    // 从URL提取域名作为标题
+    let urlTitle = '解析中...';
+    try {
+        const urlObj = new URL(url);
+        urlTitle = urlObj.hostname.replace('www.', '');
+    } catch {}
+
     // 显示进度
-    showParserProgress(true);
-    updateParserProgress(5, '正在分析网页...');
+    showParserProgress(true, urlTitle);
+    updateParserProgress(5, '正在分析网页...', 'fetching');
 
     // 禁用按钮
     const parseBtn = document.getElementById('parse-video-btn');
@@ -2922,8 +3223,8 @@ async function confirmLoadParsedVideo() {
         return;
     }
 
-    showParserProgress(true);
-    updateParserProgress(35, '正在获取视频源...');
+    showParserProgress(true, info.title || '下载中...');
+    updateParserProgress(35, '正在获取视频源...', 'downloading');
 
     // 禁用按钮
     const parseBtn = document.getElementById('parse-video-btn');
@@ -3011,43 +3312,14 @@ async function confirmLoadParsedVideo() {
  * 处理解析进度
  */
 function handleParserProgress(data) {
-    updateParserProgress(data.progress, data.message);
+    updateParserProgress(data.progress, data.message, data.stage);
 
     if (data.stage === 'complete') {
-        setTimeout(() => showParserProgress(false), 1000);
+        setTimeout(() => showParserProgress(false), 1500);
     } else if (data.stage === 'error') {
         showToast(data.message, 'error');
-        showParserProgress(false);
+        setTimeout(() => showParserProgress(false), 2000);
     }
-}
-
-/**
- * 显示/隐藏解析进度条
- */
-function showParserProgress(show) {
-    const container = document.getElementById('parser-progress-container');
-    if (container) container.style.display = show ? 'flex' : 'none';
-}
-
-/**
- * 更新解析进度
- */
-function updateParserProgress(percent, message) {
-    const bar = document.getElementById('parser-progress-bar');
-    const text = document.getElementById('parser-progress-text');
-    const percentText = document.getElementById('parser-progress-percent');
-
-    if (bar) {
-        bar.style.width = `${percent}%`;
-        // Error state handling
-        if (message && (message.includes('失败') || message.includes('错误') || message.includes('Error'))) {
-            bar.parentElement.parentElement.classList.add('error');
-        } else {
-            bar.parentElement.parentElement.classList.remove('error');
-        }
-    }
-    if (text) text.textContent = message;
-    if (percentText) percentText.textContent = `${percent}%`;
 }
 
 /**

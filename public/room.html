@@ -152,30 +152,54 @@
             </div>
           </div>
 
-          <!-- 公共进度条区域 -->
-          <div class="parser-progress" id="parser-progress-container" style="display: none;">
-            <div class="progress-info">
-              <span class="progress-text" id="parser-progress-text">解析中...</span>
-              <span class="progress-percent" id="parser-progress-percent">0%</span>
+          <!-- 公共进度条区域 - 解析专用 -->
+          <div class="processing-card parser-processing" id="parser-progress-container" style="display: none;">
+            <div class="processing-content">
+              <div class="processing-icon-wrapper">
+                <div class="processing-spinner"></div>
+                <i class="fa-solid fa-globe processing-icon-inner" id="parser-processing-icon"></i>
+              </div>
+              <div class="processing-info">
+                <div class="processing-header">
+                  <span class="processing-title" id="parser-progress-text">解析中...</span>
+                  <span class="processing-status" id="parser-progress-percent">0%</span>
+                </div>
+                <div class="processing-message" id="parser-progress-message">正在分析视频链接...</div>
+              </div>
+              <div class="processing-actions">
+                <button class="processing-action-btn" id="parser-cancel-btn" title="取消">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
             </div>
-            <div class="progress-bar">
-              <div class="progress-fill" id="parser-progress-bar"></div>
+            <div class="processing-progress-track">
+              <div class="processing-progress-fill" id="parser-progress-bar"></div>
             </div>
           </div>
 
-          <div class="parser-progress" id="upload-progress" style="display: none;">
-            <div class="progress-info">
-              <span class="progress-text" id="progress-text">上传中...</span>
-              <span class="progress-percent" id="progress-percent">0%</span>
+          <!-- 统一的处理进度卡片 (上传+转码合一) -->
+          <div class="processing-card" id="processing-card" style="display: none;">
+            <div class="processing-content">
+              <div class="processing-icon-wrapper">
+                <div class="processing-spinner"></div>
+                <i class="fa-solid fa-cloud-arrow-up processing-icon-inner" id="processing-icon"></i>
+              </div>
+              <div class="processing-info">
+                <div class="processing-header">
+                  <span class="processing-title" id="processing-title">准备上传...</span>
+                  <span class="processing-status" id="processing-status">0%</span>
+                </div>
+                <div class="processing-message" id="processing-message">正在准备...</div>
+              </div>
+              <div class="processing-actions">
+                <button class="processing-action-btn" id="processing-cancel-btn" title="取消">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
             </div>
-            <div class="progress-bar">
-              <div class="progress-fill" id="progress-fill"></div>
+            <div class="processing-progress-track">
+              <div class="processing-progress-fill" id="processing-progress-bar"></div>
             </div>
-          </div>
-
-          <div class="transcode-overlay" id="transcode-overlay" style="display: none;">
-            <div class="transcode-spinner"></div>
-            <span class="transcode-text">正在转码...</span>
           </div>
         </div>
 
@@ -518,14 +542,23 @@
         <button id="bilibili-play-btn" class="btn btn-primary bilibili-play-btn">
           <i class="fa-solid fa-play"></i> 播放视频
         </button>
-        <!-- 下载进度条 -->
-        <div id="bilibili-progress-container" class="bilibili-progress-container" style="display: none;">
-          <div class="progress-info">
-            <span id="bilibili-progress-text">准备下载...</span>
-            <span id="bilibili-progress-percent">0%</span>
+        <!-- B站下载进度卡片 -->
+        <div id="bilibili-progress-container" class="processing-card bilibili-processing" style="display: none;">
+          <div class="processing-content">
+            <div class="processing-icon-wrapper">
+              <div class="processing-spinner"></div>
+              <i class="fa-brands fa-bilibili processing-icon-inner" id="bilibili-processing-icon"></i>
+            </div>
+            <div class="processing-info">
+              <div class="processing-header">
+                <span class="processing-title" id="bilibili-progress-text">准备下载...</span>
+                <span class="processing-status" id="bilibili-progress-percent">0%</span>
+              </div>
+              <div class="processing-message" id="bilibili-progress-message">正在获取视频流...</div>
+            </div>
           </div>
-          <div class="progress-bar-bg">
-            <div id="bilibili-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+          <div class="processing-progress-track">
+            <div class="processing-progress-fill" id="bilibili-progress-bar"></div>
           </div>
         </div>
       </div>
