@@ -1645,27 +1645,36 @@ input::placeholder {
   position: absolute;
   bottom: 100%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 6px, 0);
   width: 40px;
   height: 120px;
   background: rgba(12, 12, 18, 0.95);
   border-radius: 16px;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 14px 0;
   padding-bottom: 18px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 
     0 8px 32px rgba(0, 0, 0, 0.4),
     0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 60;
 }
 
-.volume-container:hover .volume-slider-wrapper {
-  display: flex;
+.volume-container:hover .volume-slider-wrapper,
+.volume-slider-wrapper:hover {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(-50%, 0, 0);
 }
 
 #volume-slider {
@@ -1702,13 +1711,13 @@ input::placeholder {
   position: absolute;
   bottom: 100%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 6px, 0);
   background: rgba(12, 12, 18, 0.95);
   border-radius: 14px;
   padding: 8px 0;
   padding-bottom: 14px;
-  margin-bottom: 8px;
-  display: none;
+  margin-bottom: 0;
+  display: flex;
   flex-direction: column;
   min-width: 80px;
   -webkit-backdrop-filter: blur(20px);
@@ -1717,11 +1726,20 @@ input::placeholder {
   box-shadow: 
     0 8px 32px rgba(0, 0, 0, 0.4),
     0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 60;
 }
 
 .speed-selector:hover .speed-menu,
+.speed-menu:hover,
 .speed-menu.show {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(-50%, 0, 0);
 }
 
 .speed-option {
@@ -1757,13 +1775,13 @@ input::placeholder {
   position: absolute;
   bottom: 100%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 6px, 0);
   background: rgba(12, 12, 18, 0.95);
   border-radius: 14px;
   padding: 8px 0;
   padding-bottom: 14px;
-  margin-bottom: 8px;
-  display: none;
+  margin-bottom: 0;
+  display: flex;
   flex-direction: column;
   min-width: 120px;
   max-height: 220px;
@@ -1775,11 +1793,19 @@ input::placeholder {
     0 8px 32px rgba(0, 0, 0, 0.4),
     0 0 0 1px rgba(255, 255, 255, 0.03) inset;
   z-index: 100;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .track-selector:hover .selector-menu,
+.selector-menu:hover,
 .selector-menu.show {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(-50%, 0, 0);
 }
 
 .menu-item {
@@ -4121,11 +4147,14 @@ input::placeholder {
 .parser-rules-modal {
   max-width: 700px;
   max-height: 85vh;
+  overflow: hidden;
 }
 
 .parser-rules-modal .modal-body {
   max-height: calc(85vh - 140px);
   overflow-y: auto;
+  padding-right: 0.5rem;
+  scrollbar-gutter: stable;
 }
 
 .parser-rules-btn {
