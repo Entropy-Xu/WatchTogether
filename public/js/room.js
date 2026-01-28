@@ -3727,14 +3727,26 @@ async function createOfferForViewer(viewerId, viewerName) {
         console.warn('[屏幕共享] 设置码率失败:', err);
     }
 
-    // ICE candidate 交换
+    // ICE candidate 交换 (增强日志)
     pc.onicecandidate = (event) => {
         if (event.candidate) {
+            const c = event.candidate;
+            console.log(`[ICE-Host] 本地候选: type=${c.type}, protocol=${c.protocol}, address=${c.address || c.ip}:${c.port}`);
             socket.emit('screen-share-ice', {
                 targetId: viewerId,
                 candidate: event.candidate
             });
+        } else {
+            console.log('[ICE-Host] 本地候选收集完成 (end-of-candidates)');
         }
+    };
+
+    pc.onicegatheringstatechange = () => {
+        console.log(`[ICE-Host] 收集状态: ${pc.iceGatheringState}`);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+        console.log(`[ICE-Host] ICE连接状态: ${pc.iceConnectionState}`);
     };
 
     pc.onconnectionstatechange = () => {
@@ -3772,14 +3784,26 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
     const pc = new RTCPeerConnection(rtcConfig);
     peerConnections.set(sharerId, pc);
 
-    // ICE candidate 交换
+    // ICE candidate 交换 (增强日志)
     pc.onicecandidate = (event) => {
         if (event.candidate) {
+            const c = event.candidate;
+            console.log(`[ICE-Viewer] 本地候选: type=${c.type}, protocol=${c.protocol}, address=${c.address || c.ip}:${c.port}`);
             socket.emit('screen-share-ice', {
                 targetId: sharerId,
                 candidate: event.candidate
             });
+        } else {
+            console.log('[ICE-Viewer] 本地候选收集完成 (end-of-candidates)');
         }
+    };
+
+    pc.onicegatheringstatechange = () => {
+        console.log(`[ICE-Viewer] 收集状态: ${pc.iceGatheringState}`);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+        console.log(`[ICE-Viewer] ICE连接状态: ${pc.iceConnectionState}`);
     };
 
     // 接收远程流
@@ -3904,12 +3928,18 @@ async function handleScreenShareAnswer(viewerId, answer) {
  */
 async function handleScreenShareIce(fromId, candidate) {
     const pc = peerConnections.get(fromId);
-    if (!pc) return;
+    if (!pc) {
+        console.warn(`[ICE] 收到候选但找不到连接: ${fromId}`);
+        return;
+    }
+
+    // 记录收到的远程候选详情
+    console.log(`[ICE] 收到远程候选: type=${candidate.type || candidate.candidateType}, protocol=${candidate.protocol}, address=${candidate.address || '?'}:${candidate.port || '?'}`);
 
     try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
-        console.error('[屏幕共享] 添加 ICE candidate 失败:', err);
+        console.error('[ICE] 添加远程候选失败:', err, candidate);
     }
 }
 
