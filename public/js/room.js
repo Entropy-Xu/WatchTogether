@@ -3789,6 +3789,13 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
         if (video && event.streams[0]) {
             video.srcObject = event.streams[0];
             showScreenShareContainer(true, sharerName);
+
+            // 尝试自动播放
+            video.play().catch(e => {
+                console.warn('[屏幕共享] 自动播放失败:', e);
+                showToast('点击屏幕以开始播放视频', 'info');
+            });
+
             // 清除超时定时器
             if (pc._connectionTimeout) {
                 clearTimeout(pc._connectionTimeout);
@@ -3864,8 +3871,8 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        // 等待 ICE 收集完成或超时，确保有足够的候选
-        await waitForIceGathering(pc);
+        // 不再等待 ICE 收集，立即发送 answer 以便对方能及时处理 Trickle ICE
+        // await waitForIceGathering(pc);
 
         socket.emit('screen-share-answer', {
             targetId: sharerId,
