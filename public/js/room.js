@@ -3745,13 +3745,13 @@ async function createOfferForViewer(viewerId, viewerName) {
         }
     };
 
-    // 创建并发送 offer（等待 ICE 收集后再发送）
+    // 创建并发送 offer
     try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // 等待 ICE 收集完成或超时，确保有足够的候选
-        await waitForIceGathering(pc);
+        // 不再等待 ICE 收集，使用 Trickle ICE 加速连接建立
+        // await waitForIceGathering(pc);
 
         socket.emit('screen-share-offer', {
             targetId: viewerId,

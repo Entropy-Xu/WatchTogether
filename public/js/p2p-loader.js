@@ -121,11 +121,11 @@ class P2PLoader {
             this._setupDataChannel(dc, peerId);
             peerInfo.dataChannel = dc;
 
-            // 创建并发送 offer（等待 ICE 收集后再发送）
+            // 创建并发送 offer
             try {
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
-                await this._waitForIceGathering(pc);
+                // await this._waitForIceGathering(pc); // 移除等待
                 this.socket.emit('p2p-offer', {
                     targetId: peerId,
                     offer: pc.localDescription
@@ -203,7 +203,7 @@ class P2PLoader {
             await peerInfo.pc.setRemoteDescription(new RTCSessionDescription(offer));
             const answer = await peerInfo.pc.createAnswer();
             await peerInfo.pc.setLocalDescription(answer);
-            await this._waitForIceGathering(peerInfo.pc);
+            // await this._waitForIceGathering(peerInfo.pc);
 
             this.socket.emit('p2p-answer', {
                 targetId: fromId,
