@@ -205,7 +205,7 @@ function updateProcessingCard(phase, data) {
     if (phase === 'upload') {
         currentProcessingState.phase = 'uploading';
         card.className = 'processing-card uploading';
-        
+
         updateProcessingUI({
             icon: 'fa-cloud-arrow-up',
             title: truncateFileName(currentProcessingState.fileName, 30),
@@ -230,7 +230,7 @@ function updateProcessingCard(phase, data) {
         // 确保卡片可见
         card.style.display = 'block';
         currentProcessingState.phase = 'transcoding';
-        
+
         const stageText = {
             'analyzing': '分析中',
             'transcoding': '转码中',
@@ -264,7 +264,7 @@ function updateProcessingCard(phase, data) {
                 message: '视频处理完成，即将播放！',
                 progress: 100
             });
-            
+
             // 延迟隐藏
             setTimeout(() => hideProcessingCard(), 2000);
         } else if (data.stage === 'error') {
@@ -276,7 +276,7 @@ function updateProcessingCard(phase, data) {
                 message: data.message || '处理失败，请重试',
                 progress: data.progress
             });
-            
+
             setTimeout(() => hideProcessingCard(), 3000);
         } else {
             card.className = 'processing-card transcoding';
@@ -384,7 +384,7 @@ function updateBilibiliProgress(data) {
     // 生成友好消息
     let friendlyMessage = data.message || '正在下载...';
     let titleText = '下载中...';
-    
+
     if (data.progress < 30) {
         titleText = '获取视频流...';
         friendlyMessage = '正在获取视频资源...';
@@ -487,7 +487,7 @@ function updateParserProgress(percent, message, stage) {
     if (bar) {
         bar.style.width = `${percent}%`;
     }
-    
+
     if (percentText) {
         percentText.textContent = `${percent}%`;
     }
@@ -495,7 +495,7 @@ function updateParserProgress(percent, message, stage) {
     // 根据阶段显示不同内容
     let titleText = '解析中...';
     let friendlyMessage = message || '正在处理...';
-    
+
     if (stage === 'fetching' || percent < 30) {
         titleText = '获取页面...';
         friendlyMessage = '正在获取视频页面...';
@@ -3114,7 +3114,7 @@ async function parseVideoUrl() {
     try {
         const urlObj = new URL(url);
         urlTitle = urlObj.hostname.replace('www.', '');
-    } catch {}
+    } catch { }
 
     // 显示进度
     showParserProgress(true, urlTitle);
@@ -3661,6 +3661,41 @@ function stopScreenShare() {
 }
 
 /**
+ * 等待 ICE 收集完成或超时
+ * @param {RTCPeerConnection} pc - PeerConnection 实例
+ * @param {number} timeout - 超时时间（毫秒），默认 2 秒
+ * @returns {Promise<void>}
+ */
+function waitForIceGathering(pc, timeout = 2000) {
+    return new Promise((resolve) => {
+        // 如果已经收集完成，直接返回
+        if (pc.iceGatheringState === 'complete') {
+            console.log('[屏幕共享] ICE 收集已完成');
+            resolve();
+            return;
+        }
+
+        let resolved = false;
+        const done = (reason) => {
+            if (resolved) return;
+            resolved = true;
+            console.log(`[屏幕共享] ICE 收集结束: ${reason}`);
+            resolve();
+        };
+
+        // 监听收集状态变化
+        pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === 'complete') {
+                done('gathering complete');
+            }
+        };
+
+        // 超时后也继续（使用已收集到的候选）
+        setTimeout(() => done('timeout'), timeout);
+    });
+}
+
+/**
  * 为新观看者创建 P2P 连接并发送 offer
  */
 async function createOfferForViewer(viewerId, viewerName) {
@@ -3710,15 +3745,19 @@ async function createOfferForViewer(viewerId, viewerName) {
         }
     };
 
-    // 创建并发送 offer
+    // 创建并发送 offer（等待 ICE 收集后再发送）
     try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+
+        // 等待 ICE 收集完成或超时，确保有足够的候选
+        await waitForIceGathering(pc);
 
         socket.emit('screen-share-offer', {
             targetId: viewerId,
             offer: pc.localDescription
         });
+        console.log(`[屏幕共享] Offer 已发送给 ${viewerName}`);
     } catch (err) {
         console.error('[屏幕共享] 创建 offer 失败:', err);
     }
@@ -3825,10 +3864,14 @@ async function handleScreenShareOffer(sharerId, sharerName, offer) {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
+        // 等待 ICE 收集完成或超时，确保有足够的候选
+        await waitForIceGathering(pc);
+
         socket.emit('screen-share-answer', {
             targetId: sharerId,
             answer: pc.localDescription
         });
+        console.log('[屏幕共享] Answer 已发送');
     } catch (err) {
         console.error('[屏幕共享] 处理 offer 失败:', err);
     }
