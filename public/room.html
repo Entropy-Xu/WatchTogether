@@ -88,6 +88,9 @@
               <button class="input-tab" data-target="tab-parser">
                 <i class="fa-solid fa-globe"></i> 解析
               </button>
+              <button class="input-tab" data-target="tab-obs">
+                <i class="fa-solid fa-broadcast-tower"></i> 直播
+              </button>
             </div>
             <button class="input-collapse-btn" id="toggle-input-btn" title="隐藏输入栏" aria-expanded="true">
               <i class="fa-solid fa-chevron-up"></i>
@@ -157,6 +160,101 @@
             </div>
           </div>
 
+          <div class="input-tab-content" id="tab-obs">
+            <div class="obs-stream-container">
+              <!-- 未开播状态：显示推流配置 -->
+              <div id="obs-setup" class="obs-setup">
+                <div class="obs-no-permission" id="obs-no-permission" style="display: none;">
+                  <div class="input-action-container">
+                    <div class="main-input-group locked" style="justify-content: center;">
+                      <i class="fa-solid fa-lock" style="margin-right: 8px; color: var(--warning);"></i>
+                      <span style="color: var(--text-muted);">仅房主可开启直播</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="obs-stream-info" id="obs-stream-info" style="display: none;">
+                  <div class="input-action-container">
+                    <div class="main-input-group">
+                      <input type="text" id="obs-rtmp-url" readonly placeholder="推流地址（点击获取）"
+                        class="obs-stream-input">
+                      <button class="load-btn copy-field-btn" data-target="obs-rtmp-url" title="复制"
+                        aria-label="复制推流地址">
+                        <i class="fa-solid fa-copy"></i>
+                        <span class="d-none-mobile">复制</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="input-action-container">
+                    <div class="main-input-group">
+                      <input type="text" id="obs-stream-key" readonly placeholder="推流码（点击获取）"
+                        class="obs-stream-input">
+                      <button class="load-btn copy-field-btn" data-target="obs-stream-key" title="复制"
+                        aria-label="复制推流码">
+                        <i class="fa-solid fa-copy"></i>
+                        <span class="d-none-mobile">复制</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="input-action-container">
+                    <p class="obs-hint">
+                      <i class="fa-solid fa-info-circle"></i> 在 OBS 中选择「自定义」服务，粘贴以上信息
+                    </p>
+                  </div>
+
+                  <!-- Initial Action Button Wrapper -->
+                  <div class="input-action-container obs-action-wrapper" id="obs-action-wrapper">
+                    <div class="main-input-group">
+                      <input type="text" readonly placeholder="获取 OBS 推流地址与密钥" class="obs-stream-input"
+                        aria-label="获取 OBS 推流地址与密钥">
+                      <button id="get-stream-key-btn" class="load-btn">
+                        <i class="fa-solid fa-key"></i> <span>获取密钥</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 直播中状态 -->
+              <div id="obs-live" class="obs-live" style="display: none;">
+                <div class="input-action-container">
+                  <div class="main-input-group"
+                    style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);">
+                    <div class="live-indicator"
+                      style="border:none; padding:0; background:transparent; display:flex; align-items:center;">
+                      <span class="live-dot" style="margin-right: 8px;"></span>
+                      <span class="live-text" style="margin-right: 12px;">直播中</span>
+                      <span class="live-streamer" id="live-streamer-name" style="color: var(--text-primary);"></span>
+                    </div>
+                    <div style="flex:1;"></div>
+                    <button id="stop-stream-btn" class="load-btn"
+                      style="background: linear-gradient(135deg, var(--error), #dc2626); box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);">
+                      <i class="fa-solid fa-stop" style="margin-right: 6px;"></i> <span>停止直播</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 观看直播状态（非推流者） -->
+              <div id="obs-watching" class="obs-watching" style="display: none;">
+                <div class="input-action-container">
+                  <div class="main-input-group locked">
+                    <div class="live-indicator"
+                      style="border:none; padding:0; background:transparent; display:flex; align-items:center;">
+                      <span class="live-dot" style="margin-right: 8px;"></span>
+                      <span class="live-text">正在观看直播</span>
+                    </div>
+                    <div style="flex:1; text-align: right;">
+                      <span id="watching-streamer" style="color: var(--text-secondary); margin-left: 10px;"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 公共进度条区域 - 解析专用 -->
           <div class="processing-card parser-processing" id="parser-progress-container" style="display: none;">
             <div class="processing-content">
@@ -172,7 +270,7 @@
                 <div class="processing-message" id="parser-progress-message">正在分析视频链接...</div>
               </div>
               <div class="processing-actions">
-                <button class="processing-action-btn" id="parser-cancel-btn" title="取消">
+                <button class="processing-action-btn" id="parser-proc-cancel-btn" title="取消">
                   <i class="fa-solid fa-xmark"></i>
                 </button>
               </div>
@@ -460,6 +558,16 @@
               <span class="slider"></span>
             </label>
           </div>
+          <div class="permission-item">
+            <div class="permission-info">
+              <label>允许所有人推流直播</label>
+              <span class="permission-desc">开启后所有用户都可以使用 OBS 推流</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="allow-stream-switch">
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
@@ -671,7 +779,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button id="parser-cancel-btn" class="btn btn-secondary">取消</button>
+        <button id="parser-modal-cancel-btn" class="btn btn-secondary">取消</button>
         <button id="parser-confirm-btn" class="btn btn-primary">
           <i class="fa-solid fa-play"></i> 加载视频
         </button>

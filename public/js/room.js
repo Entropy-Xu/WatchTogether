@@ -18,7 +18,16 @@ let danmakuSpeed = 10; // 弹幕速度 (秒)
 let roomSettings = {
     allowAllChangeVideo: false,
     allowAllChangeSubtitle: false,
-    allowAllControl: true
+    allowAllControl: true,
+    allowAllStream: false
+};
+
+// 直播推流状态
+let liveStreamState = {
+    isStreaming: false,
+    streamerId: null,
+    streamerName: null,
+    hlsUrl: null
 };
 
 // 屏幕共享相关变量
@@ -58,7 +67,24 @@ const rtcConfig = {
         // 国际 STUN 服务器（备用）
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
-        { urls: 'stun:stun.stunprotocol.org:3478' }
+        { urls: 'stun:stun.stunprotocol.org:3478' },
+        // TURN 服务器 - 用于穿透对称型 NAT
+        // OpenRelay 免费 TURN (https://www.metered.ca/tools/openrelay/)
+        {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        }
     ],
     iceCandidatePoolSize: 10,       // 预先收集 ICE 候选，加速连接
     bundlePolicy: 'max-bundle',     // 优化：合并媒体流
@@ -943,6 +969,19 @@ function joinRoom() {
                 p2pLoader = new P2PLoader(socket, roomId, rtcConfig);
                 p2pLoader.join();
                 console.log('[P2P] 视频片段共享已启动');
+            }
+
+            // 同步直播推流状态
+            if (response.liveStreamState && response.liveStreamState.isStreaming) {
+                console.log('[直播] 加入时发现有人正在直播:', response.liveStreamState.streamerName);
+                liveStreamState = response.liveStreamState;
+                updateOBSStreamUI();
+                // 如果不是推流者，加载 HLS 流
+                if (socket.id !== response.liveStreamState.streamerId) {
+                    loadLiveStream(response.liveStreamState.hlsUrl);
+                }
+            } else {
+                updateOBSStreamUI();
             }
 
             showToast(`已加入放映室 ${roomId}`, 'success');
@@ -1883,6 +1922,8 @@ function updateSettingsUI() {
     document.getElementById('allow-video-switch').checked = roomSettings.allowAllChangeVideo;
     document.getElementById('allow-subtitle-switch').checked = roomSettings.allowAllChangeSubtitle;
     document.getElementById('allow-control-switch').checked = roomSettings.allowAllControl;
+    const streamSwitch = document.getElementById('allow-stream-switch');
+    if (streamSwitch) streamSwitch.checked = roomSettings.allowAllStream || false;
 }
 
 // 复制邀请链接
@@ -1917,10 +1958,12 @@ function hideSettingsModal() {
 
 // 保存房间设置
 function saveRoomSettings() {
+    const streamSwitch = document.getElementById('allow-stream-switch');
     const settings = {
         allowAllChangeVideo: document.getElementById('allow-video-switch').checked,
         allowAllChangeSubtitle: document.getElementById('allow-subtitle-switch').checked,
-        allowAllControl: document.getElementById('allow-control-switch').checked
+        allowAllControl: document.getElementById('allow-control-switch').checked,
+        allowAllStream: streamSwitch ? streamSwitch.checked : false
     };
 
     socket.emit('update-settings', { settings }, (response) => {
@@ -3008,6 +3051,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initVideoParser(); // Renamed from initParserFeatures to match existing function name
     initTabListeners(); // Add tab listeners
     initInputCollapseToggle();
+    initOBSStreamTab(); // Initialize OBS streaming Tab
 });
 
 // 在 startRoom 中初始化 B 站功能
@@ -3050,7 +3094,8 @@ function initVideoParser() {
 
     // 预览弹窗事件
     document.getElementById('parser-modal-close')?.addEventListener('click', hideParserModal);
-    document.getElementById('parser-cancel-btn')?.addEventListener('click', hideParserModal);
+    document.getElementById('parser-modal-cancel-btn')?.addEventListener('click', hideParserModal);
+    document.getElementById('parser-proc-cancel-btn')?.addEventListener('click', () => showParserProgress(false));
     document.getElementById('parser-confirm-btn')?.addEventListener('click', confirmLoadParsedVideo);
 
     // 支持网站弹窗事件
@@ -3933,13 +3978,20 @@ async function handleScreenShareIce(fromId, candidate) {
         return;
     }
 
-    // 记录收到的远程候选详情
-    console.log(`[ICE] 收到远程候选: type=${candidate.type || candidate.candidateType}, protocol=${candidate.protocol}, address=${candidate.address || '?'}:${candidate.port || '?'}`);
+    // 解析 candidate 字符串获取类型信息
+    // 格式: "candidate:... typ host/srflx/relay ..."
+    const candStr = candidate.candidate || '';
+    const typeMatch = candStr.match(/typ\s+(\w+)/);
+    const addrMatch = candStr.match(/(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s+typ/);
+    const type = typeMatch ? typeMatch[1] : 'unknown';
+    const addr = addrMatch ? `${addrMatch[1]}:${addrMatch[2]}` : 'unknown';
+
+    console.log(`[ICE] 收到远程候选: type=${type}, addr=${addr}`);
 
     try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
-        console.error('[ICE] 添加远程候选失败:', err, candidate);
+        console.error('[ICE] 添加远程候选失败:', err);
     }
 }
 
@@ -4813,4 +4865,272 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+// ==========================================
+// OBS 直播推流
+// ==========================================
+
+/**
+ * 初始化 OBS 直播 Tab
+ */
+function initOBSStreamTab() {
+    // 获取推流密钥按钮
+    const getKeyBtn = document.getElementById('get-stream-key-btn');
+    if (getKeyBtn) {
+        getKeyBtn.addEventListener('click', getStreamKey);
+    }
+
+    // 停止直播按钮
+    const stopBtn = document.getElementById('stop-stream-btn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopLiveStream);
+    }
+
+    // 复制按钮
+    document.querySelectorAll('.copy-field-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (input && input.value) {
+                navigator.clipboard.writeText(input.value).then(() => {
+                    showToast('已复制到剪贴板', 'success');
+                }).catch(() => {
+                    showToast('复制失败', 'error');
+                });
+            }
+        });
+    });
+
+    // 监听直播相关 socket 事件
+    if (socket) {
+        socket.on('stream-started', handleStreamStarted);
+        socket.on('stream-stopped', handleStreamStopped);
+    }
+}
+
+/**
+ * 更新 OBS 直播 Tab UI
+ */
+function updateOBSStreamUI() {
+    const setupDiv = document.getElementById('obs-setup');
+    const liveDiv = document.getElementById('obs-live');
+    const watchingDiv = document.getElementById('obs-watching');
+    const noPermissionDiv = document.getElementById('obs-no-permission');
+    const streamInfoDiv = document.getElementById('obs-stream-info');
+    const getKeyBtn = document.getElementById('get-stream-key-btn');
+    const streamerNameEl = document.getElementById('live-streamer-name');
+    const watchingStreamerEl = document.getElementById('watching-streamer');
+
+    if (!setupDiv || !liveDiv || !watchingDiv) return;
+
+    const canStream = isHost || roomSettings.allowAllStream;
+
+    if (liveStreamState.isStreaming) {
+        setupDiv.style.display = 'none';
+
+        if (socket && socket.id === liveStreamState.streamerId) {
+            // 我是推流者
+            liveDiv.style.display = 'flex';
+            watchingDiv.style.display = 'none';
+            if (streamerNameEl) {
+                streamerNameEl.textContent = `(${liveStreamState.streamerName})`;
+            }
+        } else {
+            // 我是观众
+            liveDiv.style.display = 'none';
+            watchingDiv.style.display = 'flex';
+            if (watchingStreamerEl) {
+                watchingStreamerEl.textContent = `${liveStreamState.streamerName} 正在直播`;
+            }
+        }
+    } else {
+        liveDiv.style.display = 'none';
+        watchingDiv.style.display = 'none';
+        setupDiv.style.display = 'flex';
+
+        if (canStream) {
+            noPermissionDiv.style.display = 'none';
+            streamInfoDiv.style.display = 'flex';
+            if (getKeyBtn) getKeyBtn.style.display = 'inline-flex';
+        } else {
+            noPermissionDiv.style.display = 'flex';
+            streamInfoDiv.style.display = 'none';
+            if (getKeyBtn) getKeyBtn.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * 获取推流密钥
+ */
+async function getStreamKey() {
+    const btn = document.getElementById('get-stream-key-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 获取中...';
+    }
+
+    try {
+        const response = await fetch('/api/stream/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomId, socketId: socket.id })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('obs-rtmp-url').value = data.data.rtmpUrl;
+            document.getElementById('obs-stream-key').value = data.data.streamKey;
+            showToast('推流密钥已生成，请在 OBS 中配置', 'success');
+        } else {
+            showToast(data.error || '获取推流密钥失败', 'error');
+        }
+    } catch (err) {
+        console.error('[直播] 获取推流密钥失败:', err);
+        showToast('获取推流密钥失败', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-key"></i> 获取推流密钥';
+        }
+    }
+}
+
+/**
+ * 停止直播
+ */
+async function stopLiveStream() {
+    const btn = document.getElementById('stop-stream-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 停止中...';
+    }
+
+    try {
+        const response = await fetch('/api/stream/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roomId, socketId: socket.id })
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            showToast(data.error || '停止直播失败', 'error');
+        }
+    } catch (err) {
+        console.error('[直播] 停止直播失败:', err);
+        showToast('停止直播失败', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-stop"></i> 停止直播';
+        }
+    }
+}
+
+/**
+ * 加载直播 HLS 流 (带重试机制)
+ */
+function loadLiveStream(hlsUrl, retryCount = 0) {
+    if (!hlsUrl) return;
+
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY = 3000; // 每次重试等待 3 秒
+
+    console.log(`[直播] 加载 HLS 流 (尝试 ${retryCount + 1}/${MAX_RETRIES + 1}):`, hlsUrl);
+
+    if (retryCount === 0) {
+        showNotification(`正在加载直播流...`);
+    }
+
+    // 先检查文件是否存在
+    fetch(hlsUrl, { method: 'HEAD' })
+        .then(response => {
+            if (response.ok) {
+                // 文件存在，加载视频
+                console.log('[直播] HLS 文件已就绪，开始播放');
+                loadVideo(hlsUrl);
+            } else if (retryCount < MAX_RETRIES) {
+                // 文件不存在，重试
+                console.log(`[直播] HLS 文件尚未准备好，${RETRY_DELAY / 1000} 秒后重试...`);
+                setTimeout(() => {
+                    loadLiveStream(hlsUrl, retryCount + 1);
+                }, RETRY_DELAY);
+            } else {
+                // 超过最大重试次数
+                console.error('[直播] HLS 文件加载失败，超过最大重试次数');
+                showNotification('直播流加载失败，请刷新页面重试', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('[直播] 检查 HLS 文件时出错:', error);
+            if (retryCount < MAX_RETRIES) {
+                setTimeout(() => {
+                    loadLiveStream(hlsUrl, retryCount + 1);
+                }, RETRY_DELAY);
+            } else {
+                showNotification('直播流加载失败，请刷新页面重试', 'error');
+            }
+        });
+}
+
+/**
+ * 处理直播开始事件
+ */
+function handleStreamStarted(data) {
+    console.log('[直播] 直播已开始:', data);
+
+    liveStreamState = {
+        isStreaming: true,
+        streamerId: data.streamerId,
+        streamerName: data.streamerName,
+        hlsUrl: data.hlsUrl
+    };
+
+    updateOBSStreamUI();
+
+    // 如果不是推流者，加载 HLS 流
+    if (socket.id !== data.streamerId) {
+        showNotification(`${data.streamerName} 开始了直播`);
+        // 延迟 5 秒后开始加载，给 FFmpeg 足够时间生成第一个 HLS 段
+        setTimeout(() => {
+            loadLiveStream(data.hlsUrl);
+        }, 5000);
+    }
+}
+
+/**
+ * 处理直播结束事件
+ */
+function handleStreamStopped(data) {
+    console.log('[直播] 直播已结束:', data);
+
+    liveStreamState = {
+        isStreaming: false,
+        streamerId: null,
+        streamerName: null,
+        hlsUrl: null
+    };
+
+    updateOBSStreamUI();
+    showNotification(`直播已结束`);
+
+    // 清空推流信息输入框
+    const rtmpUrlInput = document.getElementById('obs-rtmp-url');
+    const streamKeyInput = document.getElementById('obs-stream-key');
+    if (rtmpUrlInput) rtmpUrlInput.value = '';
+    if (streamKeyInput) streamKeyInput.value = '';
+}
+
+/**
+ * 更新设置中的允许推流开关
+ */
+function updateAllowStreamSwitch() {
+    const allowStreamSwitch = document.getElementById('allow-stream-switch');
+    if (allowStreamSwitch) {
+        allowStreamSwitch.checked = roomSettings.allowAllStream;
+    }
 }

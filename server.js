@@ -9,6 +9,7 @@ const multer = require('multer');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+const rtmpServer = require('./rtmp-server');
 
 const app = express();
 const server = http.createServer(app);
@@ -115,7 +116,8 @@ class Room {
     this.settings = {
       allowAllChangeVideo: false,     // 是否允许所有人更换视频
       allowAllChangeSubtitle: false,  // 是否允许所有人更换字幕
-      allowAllControl: true            // 是否允许所有人控制播放
+      allowAllControl: true,          // 是否允许所有人控制播放
+      allowAllStream: false           // 是否允许所有人推流直播
     };
     // 跟踪 B 站下载的文件（用于清理）
     this.bilibiliFiles = [];
@@ -128,6 +130,16 @@ class Room {
       isSharing: false,
       sharerId: null,
       sharerName: null
+    };
+
+    // 直播推流状态
+    this.liveStreamState = {
+      isStreaming: false,
+      streamerId: null,
+      streamerName: null,
+      streamKey: null,
+      hlsUrl: null,
+      startedAt: null
     };
   }
 
@@ -657,7 +669,7 @@ app.get('/api/parser/proxy', async (req, res) => {
         proxyRes.on('end', () => {
           const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
           const proxyBase = `/api/parser/proxy?referer=${encodeURIComponent(referer || urlObj.origin)}&url=`;
-          
+
           // 重写相对路径和绝对路径
           const rewritten = data.split('\n').map(line => {
             line = line.trim();
@@ -736,8 +748,8 @@ app.get('/api/parser/rules', (req, res) => {
 app.post('/api/parser/rules/reload', (req, res) => {
   try {
     const rules = videoParser.reloadRules();
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `已重新加载 ${rules.length} 条规则`,
       count: rules.length
     });
@@ -750,14 +762,14 @@ app.post('/api/parser/rules/reload', (req, res) => {
 app.post('/api/parser/rules', (req, res) => {
   try {
     const { rule, filename } = req.body;
-    
+
     if (!rule) {
       return res.status(400).json({ success: false, error: '规则内容不能为空' });
     }
-    
+
     const result = videoParser.addUserRule(rule, filename);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: '规则添加成功',
       file: result.file
     });
@@ -781,28 +793,144 @@ app.delete('/api/parser/rules/:filename', (req, res) => {
 app.post('/api/parser/rules/test', async (req, res) => {
   try {
     const { rule, testUrl } = req.body;
-    
+
     if (!rule || !testUrl) {
       return res.status(400).json({ success: false, error: '规则和测试 URL 不能为空' });
     }
-    
+
     const result = await videoParser.testRule(rule, testUrl);
-    
+
     if (result) {
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: '规则测试成功',
         result
       });
     } else {
-      res.json({ 
-        success: false, 
+      res.json({
+        success: false,
         error: '规则未能提取到视频地址'
       });
     }
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
+});
+
+// ============ OBS 直播推流 API ============
+
+// 获取推流配置 (生成推流密钥)
+app.post('/api/stream/start', (req, res) => {
+  const { roomId, socketId } = req.body;
+
+  if (!roomId || !socketId) {
+    return res.status(400).json({ success: false, error: '缺少必要参数' });
+  }
+
+  const room = rooms.get(roomId);
+  if (!room) {
+    return res.status(404).json({ success: false, error: '房间不存在' });
+  }
+
+  // 检查权限
+  const isHost = room.isHost(socketId);
+  if (!isHost && !room.settings.allowAllStream) {
+    return res.status(403).json({ success: false, error: '没有推流权限' });
+  }
+
+  // 检查是否已有人在推流
+  if (room.liveStreamState.isStreaming) {
+    return res.status(409).json({
+      success: false,
+      error: `${room.liveStreamState.streamerName} 正在直播中`
+    });
+  }
+
+  // 生成推流密钥
+  const streamKey = `${roomId}_${uuidv4().substring(0, 8)}`;
+  const user = room.users.get(socketId);
+  const userName = user ? user.name : '未知用户';
+
+  // 注册推流
+  const streamInfo = rtmpServer.registerStream(streamKey, {
+    roomId,
+    socketId,
+    userName
+  });
+
+  // 获取服务器主机名（用于显示给用户）
+  const host = req.headers.host ? req.headers.host.split(':')[0] : 'localhost';
+
+  res.json({
+    success: true,
+    data: {
+      rtmpUrl: `rtmp://${host}:${rtmpServer.getConfig().rtmpPort}/live`,
+      streamKey,
+      hlsUrl: streamInfo.hlsUrl
+    }
+  });
+});
+
+// 获取房间直播状态
+app.get('/api/stream/status/:roomId', (req, res) => {
+  const { roomId } = req.params;
+  const room = rooms.get(roomId);
+
+  if (!room) {
+    return res.status(404).json({ success: false, error: '房间不存在' });
+  }
+
+  res.json({
+    success: true,
+    data: room.liveStreamState
+  });
+});
+
+// 停止推流
+app.post('/api/stream/stop', (req, res) => {
+  const { roomId, socketId } = req.body;
+
+  if (!roomId || !socketId) {
+    return res.status(400).json({ success: false, error: '缺少必要参数' });
+  }
+
+  const room = rooms.get(roomId);
+  if (!room) {
+    return res.status(404).json({ success: false, error: '房间不存在' });
+  }
+
+  // 只有推流者本人或房主可以停止
+  const isHost = room.isHost(socketId);
+  const isStreamer = room.liveStreamState.streamerId === socketId;
+
+  if (!isHost && !isStreamer) {
+    return res.status(403).json({ success: false, error: '没有权限停止直播' });
+  }
+
+  if (!room.liveStreamState.isStreaming) {
+    return res.status(400).json({ success: false, error: '当前没有进行中的直播' });
+  }
+
+  // 注销推流密钥 (会自动断开 RTMP 连接)
+  if (room.liveStreamState.streamKey) {
+    rtmpServer.unregisterStream(room.liveStreamState.streamKey);
+  }
+
+  // 重置直播状态
+  const stoppedBy = room.users.get(socketId)?.name || '未知用户';
+  room.liveStreamState = {
+    isStreaming: false,
+    streamerId: null,
+    streamerName: null,
+    streamKey: null,
+    hlsUrl: null,
+    startedAt: null
+  };
+
+  // 通知房间内所有用户
+  io.in(roomId).emit('stream-stopped', { stoppedBy });
+
+  res.json({ success: true, message: '直播已停止' });
 });
 
 // ============ 定时清理过期文件 ============
@@ -1456,7 +1584,8 @@ io.on('connection', (socket) => {
       userList: room.getUserList(),
       messages: room.messages.slice(-50), // 发送最近50条消息
       settings: room.settings, // 添加房间设置
-      screenShareState: room.screenShareState // 屏幕共享状态
+      screenShareState: room.screenShareState, // 屏幕共享状态
+      liveStreamState: room.liveStreamState // 直播推流状态
     });
 
     // 广播房间列表更新 (因为人数变了)
@@ -2016,4 +2145,58 @@ server.listen(PORT, () => {
 ║                                                  ║
 ╚══════════════════════════════════════════════════╝
   `);
+
+  // 启动 RTMP 服务器
+  rtmpServer.start({
+    // 推流开始回调
+    onStreamStart: ({ streamKey, roomId, socketId, hlsUrl }) => {
+      const room = rooms.get(roomId);
+      if (!room) return;
+
+      const user = room.users.get(socketId);
+      const userName = user ? user.name : '未知用户';
+
+      // 更新房间直播状态
+      room.liveStreamState = {
+        isStreaming: true,
+        streamerId: socketId,
+        streamerName: userName,
+        streamKey,
+        hlsUrl,
+        startedAt: Date.now()
+      };
+
+      // 通知房间内所有用户
+      io.in(roomId).emit('stream-started', {
+        streamerId: socketId,
+        streamerName: userName,
+        hlsUrl
+      });
+
+      console.log(`[直播] ${userName} 在房间 ${roomId} 开始推流`);
+    },
+
+    // 推流结束回调
+    onStreamEnd: ({ streamKey, roomId, socketId }) => {
+      const room = rooms.get(roomId);
+      if (!room) return;
+
+      const userName = room.liveStreamState.streamerName || '未知用户';
+
+      // 重置直播状态
+      room.liveStreamState = {
+        isStreaming: false,
+        streamerId: null,
+        streamerName: null,
+        streamKey: null,
+        hlsUrl: null,
+        startedAt: null
+      };
+
+      // 通知房间内所有用户
+      io.in(roomId).emit('stream-stopped', { stoppedBy: userName });
+
+      console.log(`[直播] ${userName} 在房间 ${roomId} 停止推流`);
+    }
+  });
 });
