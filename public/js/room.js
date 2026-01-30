@@ -2163,35 +2163,46 @@ let danmakuManager;
 
 function initDanmakuSystem() {
     danmakuManager = new DanmakuManager('danmaku-container');
-    const input = document.getElementById('danmaku-input');
-    const sendBtn = document.getElementById('send-danmaku-btn');
     const toggleBtn = document.getElementById('danmaku-toggle-btn');
     const layer = document.getElementById('danmaku-container');
 
-    function send() {
-        const text = input.value.trim();
-        if (!text) return;
+    function bindDanmakuInput(inputEl, sendBtnEl) {
+        if (!inputEl || !sendBtnEl) return;
 
-        // 本地显示弹幕
-        danmakuManager.shoot(text, '#ffffff', true);
+        function send() {
+            const text = inputEl.value.trim();
+            if (!text) return;
 
-        // 发送给服务器（同时作为聊天消息）
-        socket.emit('send-danmaku', {
-            text: text,
-            color: '#ffffff',
-            time: player.currentTime()
+            // 本地显示弹幕
+            danmakuManager.shoot(text, '#ffffff', true);
+
+            // 发送给服务器（同时作为聊天消息）
+            socket.emit('send-danmaku', {
+                text: text,
+                color: '#ffffff',
+                time: player.currentTime()
+            });
+
+            // 同时发送到聊天
+            socket.emit('chat-message', { text: text });
+
+            inputEl.value = '';
+        }
+
+        sendBtnEl.addEventListener('click', send);
+        inputEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') send();
         });
-
-        // 同时发送到聊天
-        socket.emit('chat-message', { text: text });
-
-        input.value = '';
     }
 
-    sendBtn.addEventListener('click', send);
-    input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') send();
-    });
+    bindDanmakuInput(
+        document.getElementById('danmaku-input'),
+        document.getElementById('send-danmaku-btn')
+    );
+    bindDanmakuInput(
+        document.getElementById('mobile-danmaku-input'),
+        document.getElementById('mobile-send-danmaku-btn')
+    );
 
     // 弹幕开关
     let isDanmakuOn = true;
@@ -2228,6 +2239,15 @@ function initCustomControls() {
     const currentTimeEl = document.getElementById('current-time');
     const durationEl = document.getElementById('duration');
     const speedDisplay = document.getElementById('current-speed');
+    const mobilePlayBtn = document.getElementById('mobile-play-pause-btn');
+    const mobileProgressContainer = document.getElementById('mobile-progress-container');
+    const mobileProgressTrack = document.getElementById('mobile-progress-track');
+    const mobileProgressBarCurrent = document.getElementById('mobile-progress-current');
+    const mobileProgressBarBuffered = document.getElementById('mobile-progress-buffered');
+    const mobileCurrentTimeEl = document.getElementById('mobile-current-time');
+    const mobileDurationEl = document.getElementById('mobile-duration');
+    const mobileMuteBtn = document.getElementById('mobile-mute-btn');
+    const mobileFullscreenBtn = document.getElementById('mobile-fullscreen-btn');
 
     controls.style.display = 'flex'; // 显示控件
 
@@ -2246,35 +2266,59 @@ function initCustomControls() {
         else player.pause();
     }
 
-    playBtn.addEventListener('click', togglePlay);
-    player.on('play', () => playBtn.innerHTML = '<i class="fa-solid fa-pause"></i>');
-    player.on('pause', () => playBtn.innerHTML = '<i class="fa-solid fa-play"></i>');
+    function setPlayButtonState(isPlaying) {
+        const icon = isPlaying ? 'fa-pause' : 'fa-play';
+        if (playBtn) playBtn.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+        if (mobilePlayBtn) mobilePlayBtn.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+    }
+
+    if (playBtn) playBtn.addEventListener('click', togglePlay);
+    if (mobilePlayBtn) mobilePlayBtn.addEventListener('click', togglePlay);
+    player.on('play', () => setPlayButtonState(true));
+    player.on('pause', () => setPlayButtonState(false));
+    setPlayButtonState(!player.paused());
 
     // Progress Bar
     function updateProgress() {
-        const percent = (player.currentTime() / player.duration()) * 100;
-        progressBarCurrent.style.width = percent + '%';
-        currentTimeEl.textContent = formatDuration(player.currentTime());
-        durationEl.textContent = formatDuration(player.duration());
+        const duration = player.duration() || 0;
+        const current = player.currentTime() || 0;
+        const percent = duration ? (current / duration) * 100 : 0;
 
-        const buffered = player.bufferedEnd();
-        const bufferedPercent = (buffered / player.duration()) * 100;
-        progressBarBuffered.style.width = bufferedPercent + '%';
+        if (progressBarCurrent) progressBarCurrent.style.width = percent + '%';
+        if (mobileProgressBarCurrent) mobileProgressBarCurrent.style.width = percent + '%';
+        if (currentTimeEl) currentTimeEl.textContent = formatDuration(current);
+        if (mobileCurrentTimeEl) mobileCurrentTimeEl.textContent = formatDuration(current);
+        if (durationEl) durationEl.textContent = formatDuration(duration);
+        if (mobileDurationEl) mobileDurationEl.textContent = formatDuration(duration);
+
+        const buffered = player.bufferedEnd ? player.bufferedEnd() : 0;
+        const bufferedPercent = duration ? (buffered / duration) * 100 : 0;
+        if (progressBarBuffered) progressBarBuffered.style.width = bufferedPercent + '%';
+        if (mobileProgressBarBuffered) mobileProgressBarBuffered.style.width = bufferedPercent + '%';
     }
 
     player.on('timeupdate', updateProgress);
     player.on('progress', updateProgress); // buffer update
 
-    progressContainer.addEventListener('click', (e) => {
+    function handleSeekClick(e, trackEl, containerEl) {
         if (!canControlPlayer()) {
             showToast('只有房主可以控制播放进度', 'error');
             return;
         }
-        const rect = (progressTrack || progressContainer).getBoundingClientRect();
+        const target = trackEl || containerEl;
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
         const clampedX = Math.min(Math.max(e.clientX, rect.left), rect.right);
-        const pos = (clampedX - rect.left) / rect.width;
+        const pos = rect.width ? (clampedX - rect.left) / rect.width : 0;
         player.currentTime(pos * player.duration());
-    });
+    }
+
+    if (progressContainer) {
+        progressContainer.addEventListener('click', (e) => handleSeekClick(e, progressTrack, progressContainer));
+    }
+    if (mobileProgressContainer) {
+        mobileProgressContainer.addEventListener('click', (e) => handleSeekClick(e, mobileProgressTrack, mobileProgressContainer));
+    }
 
     // Volume
     volumeSlider.addEventListener('input', (e) => {
@@ -2285,7 +2329,7 @@ function initCustomControls() {
         }
     });
 
-    player.on('volumechange', () => {
+    function updateVolumeIcons() {
         const vol = player.volume();
         const isMuted = player.muted();
         volumeSlider.value = vol;
@@ -2296,22 +2340,30 @@ function initCustomControls() {
             window.currentMseAudio.muted = isMuted;
         }
 
+        let icon = 'fa-volume-high';
         if (isMuted || vol === 0) {
-            volumeBtn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+            icon = 'fa-volume-xmark';
         } else if (vol < 0.5) {
-            volumeBtn.innerHTML = '<i class="fa-solid fa-volume-low"></i>';
-        } else {
-            volumeBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+            icon = 'fa-volume-low';
         }
-    });
 
-    volumeBtn.addEventListener('click', () => {
+        if (volumeBtn) volumeBtn.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+        if (mobileMuteBtn) mobileMuteBtn.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+    }
+
+    function toggleMute() {
         player.muted(!player.muted());
         // 同步静音状态到 MSE 音频元素 (B站视频)
         if (window.currentMseAudio) {
             window.currentMseAudio.muted = player.muted();
         }
-    });
+    }
+
+    player.on('volumechange', updateVolumeIcons);
+    updateVolumeIcons();
+
+    if (volumeBtn) volumeBtn.addEventListener('click', toggleMute);
+    if (mobileMuteBtn) mobileMuteBtn.addEventListener('click', toggleMute);
 
     // Speed
     // Toggle menu on click for better mobile/desktop experience
@@ -2348,10 +2400,15 @@ function initCustomControls() {
 
     // Fullscreen - 使用 video-wrapper 容器（包含自定义控件）
     const videoWrapper = document.getElementById('video-wrapper');
-    // Fullscreen Cross-browser support
-    fullscreenBtn.addEventListener('click', () => {
-        const videoElement = player.tech(true).el();
+    const videoElement = player.tech(true).el();
 
+    function setFullscreenIcon(isFullscreen) {
+        const icon = isFullscreen ? 'fa-compress' : 'fa-expand';
+        if (fullscreenBtn) fullscreenBtn.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+        if (mobileFullscreenBtn) mobileFullscreenBtn.innerHTML = `<i class="fa-solid ${icon}"></i>`;
+    }
+
+    function toggleFullscreen() {
         // 1. Exit Fullscreen if active
         if (document.fullscreenElement || document.webkitFullscreenElement) {
             if (document.exitFullscreen) {
@@ -2374,26 +2431,25 @@ function initCustomControls() {
             videoElement.webkitEnterFullscreen();
             // iOS native player doesn't trigger standard fullscreenchange events consistently for the document
             // manually update icon here, though the native player takes over UI anyway.
-            fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
+            setFullscreenIcon(true);
         } else {
             // Last resort: simple full viewport style (optional, maybe not needed if native supported)
             console.warn('Fullscreen API not supported');
         }
-    });
+    }
+
+    if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
+    if (mobileFullscreenBtn) mobileFullscreenBtn.addEventListener('click', toggleFullscreen);
+    setFullscreenIcon(!!(document.fullscreenElement || document.webkitFullscreenElement));
 
     // Listen for iOS native fullscreen exit
-    const videoElement = player.tech(true).el();
     videoElement.addEventListener('webkitendfullscreen', () => {
-        fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
+        setFullscreenIcon(false);
     });
 
     // 监听全屏变化事件
     document.addEventListener('fullscreenchange', () => {
-        if (document.fullscreenElement) {
-            fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
-        } else {
-            fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
-        }
+        setFullscreenIcon(!!(document.fullscreenElement || document.webkitFullscreenElement));
         resetHideTimer();
     });
 
@@ -2436,6 +2492,15 @@ function initCustomControls() {
             clearTimeout(hideTimer);
         });
         controls.addEventListener('mouseleave', () => {
+            isPointerOverControls = false;
+            resetHideTimer();
+        });
+        controls.addEventListener('focusin', () => {
+            isPointerOverControls = true;
+            showControls();
+            clearTimeout(hideTimer);
+        });
+        controls.addEventListener('focusout', () => {
             isPointerOverControls = false;
             resetHideTimer();
         });

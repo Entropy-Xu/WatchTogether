@@ -343,87 +343,123 @@
 
           <!-- Custom Control Bar -->
           <div class="custom-controls" id="custom-controls">
-            <!-- Progress Bar -->
-            <div class="progress-container" id="progress-container">
-              <div class="progress-track" id="progress-track">
-                <div class="progress-bar-bg"></div>
-                <div class="progress-bar-buffered" id="progress-buffered"></div>
-                <div class="progress-bar-current" id="progress-current">
-                  <div class="progress-handle"></div>
+            <div class="controls-desktop">
+              <!-- Progress Bar -->
+              <div class="progress-container" id="progress-container">
+                <div class="progress-track" id="progress-track">
+                  <div class="progress-bar-bg"></div>
+                  <div class="progress-bar-buffered" id="progress-buffered"></div>
+                  <div class="progress-bar-current" id="progress-current">
+                    <div class="progress-handle"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Controls Main -->
+              <div class="controls-main">
+                <div class="controls-left">
+                  <button class="control-btn" id="play-pause-btn" title="播放/暂停 (空格)">
+                    <i class="fa-solid fa-play"></i>
+                  </button>
+                  <div class="time-display">
+                    <span id="current-time">00:00</span>
+                    <span class="time-separator">/</span>
+                    <span id="duration">00:00</span>
+                  </div>
+                </div>
+
+                <!-- Danmaku Input -->
+                <div class="danmaku-input-area">
+                  <div class="danmaku-input-wrapper">
+                    <input type="text" id="danmaku-input" placeholder="发送弹幕..." maxlength="50" autocomplete="off">
+                    <button id="send-danmaku-btn" class="send-btn">发送</button>
+                  </div>
+                </div>
+
+                <div class="controls-right">
+                  <button class="control-btn active" id="danmaku-toggle-btn" title="弹幕开关 (D)">
+                    <i class="fa-solid fa-comment-dots"></i>
+                  </button>
+
+                  <div class="volume-container">
+                    <button class="control-btn" id="volume-btn" title="音量 (M)">
+                      <i class="fa-solid fa-volume-high"></i>
+                    </button>
+                    <div class="volume-slider-wrapper">
+                      <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="1">
+                    </div>
+                  </div>
+
+                  <!-- Audio Track Selector -->
+                  <div class="track-selector audio-selector" id="audio-selector" style="display: none;">
+                    <button class="control-btn" title="音轨选择">
+                      <i class="fa-solid fa-music"></i>
+                    </button>
+                    <div class="selector-menu audio-menu" id="audio-menu">
+                      <!-- Dynamically populated -->
+                    </div>
+                  </div>
+
+                  <!-- Subtitle Selector -->
+                  <div class="track-selector subtitle-selector" id="subtitle-selector">
+                    <button class="control-btn" title="字幕设置">
+                      <i class="fa-solid fa-closed-captioning"></i>
+                    </button>
+                    <div class="selector-menu subtitle-menu" id="subtitle-menu">
+                      <div class="menu-item active" data-mode="off">关闭字幕</div>
+                    </div>
+                  </div>
+
+                  <div class="speed-selector">
+                    <span id="current-speed">1.0x</span>
+                    <div class="speed-menu">
+                      <div class="speed-option" data-speed="2.0">2.0x</div>
+                      <div class="speed-option" data-speed="1.5">1.5x</div>
+                      <div class="speed-option" data-speed="1.25">1.25x</div>
+                      <div class="speed-option" data-speed="1.0">1.0x</div>
+                      <div class="speed-option" data-speed="0.75">0.75x</div>
+                      <div class="speed-option" data-speed="0.5">0.5x</div>
+                    </div>
+                  </div>
+
+                  <button class="control-btn" id="fullscreen-btn" title="全屏 (F)">
+                    <i class="fa-solid fa-expand"></i>
+                  </button>
                 </div>
               </div>
             </div>
 
-            <!-- Controls Main -->
-            <div class="controls-main">
-              <div class="controls-left">
-                <button class="control-btn" id="play-pause-btn" title="播放/暂停 (空格)">
+            <div class="controls-mobile">
+              <div class="progress-container mobile-progress-container" id="mobile-progress-container">
+                <div class="progress-track" id="mobile-progress-track">
+                  <div class="progress-bar-bg"></div>
+                  <div class="progress-bar-buffered" id="mobile-progress-buffered"></div>
+                  <div class="progress-bar-current" id="mobile-progress-current">
+                    <div class="progress-handle"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mobile-controls-row">
+                <button class="control-btn mobile-control-btn" id="mobile-play-pause-btn" title="播放/暂停">
                   <i class="fa-solid fa-play"></i>
                 </button>
-                <div class="time-display">
-                  <span id="current-time">00:00</span>
+                <div class="mobile-time-display">
+                  <span id="mobile-current-time">00:00</span>
                   <span class="time-separator">/</span>
-                  <span id="duration">00:00</span>
+                  <span id="mobile-duration">00:00</span>
                 </div>
-              </div>
-
-              <!-- Danmaku Input -->
-              <div class="danmaku-input-area">
-                <div class="danmaku-input-wrapper">
-                  <input type="text" id="danmaku-input" placeholder="发送弹幕..." maxlength="50" autocomplete="off">
-                  <button id="send-danmaku-btn" class="send-btn">发送</button>
-                </div>
-              </div>
-
-              <div class="controls-right">
-                <button class="control-btn active" id="danmaku-toggle-btn" title="弹幕开关 (D)">
-                  <i class="fa-solid fa-comment-dots"></i>
+                <button class="control-btn mobile-control-btn" id="mobile-mute-btn" title="静音">
+                  <i class="fa-solid fa-volume-high"></i>
                 </button>
-
-                <div class="volume-container">
-                  <button class="control-btn" id="volume-btn" title="音量 (M)">
-                    <i class="fa-solid fa-volume-high"></i>
-                  </button>
-                  <div class="volume-slider-wrapper">
-                    <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="1">
-                  </div>
-                </div>
-
-                <!-- Audio Track Selector -->
-                <div class="track-selector audio-selector" id="audio-selector" style="display: none;">
-                  <button class="control-btn" title="音轨选择">
-                    <i class="fa-solid fa-music"></i>
-                  </button>
-                  <div class="selector-menu audio-menu" id="audio-menu">
-                    <!-- Dynamically populated -->
-                  </div>
-                </div>
-
-                <!-- Subtitle Selector -->
-                <div class="track-selector subtitle-selector" id="subtitle-selector">
-                  <button class="control-btn" title="字幕设置">
-                    <i class="fa-solid fa-closed-captioning"></i>
-                  </button>
-                  <div class="selector-menu subtitle-menu" id="subtitle-menu">
-                    <div class="menu-item active" data-mode="off">关闭字幕</div>
-                  </div>
-                </div>
-
-                <div class="speed-selector">
-                  <span id="current-speed">1.0x</span>
-                  <div class="speed-menu">
-                    <div class="speed-option" data-speed="2.0">2.0x</div>
-                    <div class="speed-option" data-speed="1.5">1.5x</div>
-                    <div class="speed-option" data-speed="1.25">1.25x</div>
-                    <div class="speed-option" data-speed="1.0">1.0x</div>
-                    <div class="speed-option" data-speed="0.75">0.75x</div>
-                    <div class="speed-option" data-speed="0.5">0.5x</div>
-                  </div>
-                </div>
-
-                <button class="control-btn" id="fullscreen-btn" title="全屏 (F)">
+                <button class="control-btn mobile-control-btn" id="mobile-fullscreen-btn" title="全屏">
                   <i class="fa-solid fa-expand"></i>
                 </button>
+              </div>
+
+              <div class="mobile-danmaku-row">
+                <input type="text" id="mobile-danmaku-input" placeholder="发送弹幕..." maxlength="50" autocomplete="off">
+                <button id="mobile-send-danmaku-btn" class="send-btn">发送</button>
               </div>
             </div>
           </div>
