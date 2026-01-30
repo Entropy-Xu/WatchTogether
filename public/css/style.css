@@ -1285,8 +1285,14 @@ input::placeholder {
   bottom: 0;
   height: 38%;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.35) 45%, rgba(0, 0, 0, 0.7) 100%);
+  opacity: 1;
+  transition: opacity 0.25s ease;
   pointer-events: none;
   z-index: 5;
+}
+
+.video-wrapper.controls-hidden::before {
+  opacity: 0;
 }
 
 /* Pseudo-element for dynamic glow enhancement */

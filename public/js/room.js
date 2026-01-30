@@ -2391,53 +2391,58 @@ function initCustomControls() {
     document.addEventListener('fullscreenchange', () => {
         if (document.fullscreenElement) {
             fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
-            // 启动全屏自动隐藏逻辑
-            startFullscreenAutoHide();
         } else {
             fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i>';
-            // 退出全屏时清理
-            stopFullscreenAutoHide();
         }
+        resetHideTimer();
     });
 
-    // 全屏自动隐藏逻辑
+    // 自动隐藏逻辑（全屏/非全屏通用）
     let hideTimer = null;
-    let isControlsVisible = true;
+    let isPointerOverControls = false;
+
+    function setControlsVisible(visible) {
+        controls.style.opacity = visible ? '1' : '0';
+        controls.style.pointerEvents = visible ? 'auto' : 'none';
+        videoWrapper.classList.toggle('controls-hidden', !visible);
+        if (document.fullscreenElement) {
+            videoWrapper.style.cursor = visible ? 'default' : 'none';
+        } else {
+            videoWrapper.style.cursor = 'default';
+        }
+    }
 
     function showControls() {
-        controls.style.opacity = '1';
-        videoWrapper.style.cursor = 'default';
-        isControlsVisible = true;
+        setControlsVisible(true);
     }
 
     function hideControls() {
-        if (document.fullscreenElement) {
-            controls.style.opacity = '0';
-            videoWrapper.style.cursor = 'none';
-            isControlsVisible = false;
-        }
+        setControlsVisible(false);
     }
 
     function resetHideTimer() {
         showControls();
         clearTimeout(hideTimer);
-        if (document.fullscreenElement) {
-            hideTimer = setTimeout(hideControls, 3000); // 3秒后隐藏
-        }
+        if (isPointerOverControls) return;
+        hideTimer = setTimeout(hideControls, 3000); // 3秒后隐藏
     }
 
-    function startFullscreenAutoHide() {
-        videoWrapper.addEventListener('mousemove', resetHideTimer);
-        videoWrapper.addEventListener('click', resetHideTimer);
+    function startAutoHide() {
+        const activityEvents = ['mousemove', 'click', 'touchstart', 'touchmove', 'keydown'];
+        activityEvents.forEach((evt) => videoWrapper.addEventListener(evt, resetHideTimer));
+        controls.addEventListener('mouseenter', () => {
+            isPointerOverControls = true;
+            showControls();
+            clearTimeout(hideTimer);
+        });
+        controls.addEventListener('mouseleave', () => {
+            isPointerOverControls = false;
+            resetHideTimer();
+        });
         resetHideTimer();
     }
 
-    function stopFullscreenAutoHide() {
-        videoWrapper.removeEventListener('mousemove', resetHideTimer);
-        videoWrapper.removeEventListener('click', resetHideTimer);
-        clearTimeout(hideTimer);
-        showControls();
-    }
+    startAutoHide();
 
     // Audio Track Selector (HLS.js)
     initAudioTrackSelector();
