@@ -1211,7 +1211,7 @@ app.post('/api/bilibili/download', async (req, res) => {
       }
     }
 
-    const hlsUrl = `/uploads/hls_${uploadId}/index.m3u8`;
+    const hlsUrl = `/uploads/hls_${uploadId}/master.m3u8`;
     console.log(`[B站下载] HLS 转码完成: ${hlsUrl}`);
 
     res.json({
