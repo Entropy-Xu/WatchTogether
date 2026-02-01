@@ -1097,7 +1097,7 @@ app.post('/api/bilibili/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// 下载 B 站视频 (分离音视频，用于 MSE 播放)
+// 下载 B 站视频 (合并后 HLS 转码，优化 seek 性能)
 app.post('/api/bilibili/download', async (req, res) => {
   const { bvid, cid, qn, roomId } = req.body;
 
@@ -1107,47 +1107,118 @@ app.post('/api/bilibili/download', async (req, res) => {
 
   try {
     const cookie = roomId ? bilibili.getCookie(roomId) : '';
+    const uploadId = `bilibili_${bvid}_${Date.now()}`;
 
     console.log(`[B站下载] 开始处理: ${bvid}, cid: ${cid}, qn: ${qn || 80}`);
 
-    const result = await bilibili.downloadSeparate(
+    // 进度推送函数
+    const emitBilibiliProgress = (stage, progress, message) => {
+      console.log(`[B站下载] ${message} (${progress}%)`);
+      if (roomId) {
+        io.in(roomId).emit('bilibili-download-progress', {
+          stage,
+          progress,
+          message
+        });
+      }
+    };
+
+    // 阶段1: 下载并合并 (0-50%)
+    const mergedPath = await bilibili.downloadAndMerge(
       bvid,
       parseInt(cid),
       parseInt(qn) || 80,
       cookie,
       uploadsDir,
       (progress) => {
-        console.log(`[B站下载] ${progress.message} (${progress.progress}%)`);
-        // 通过 Socket.IO 推送进度到房间
-        if (roomId) {
-          io.in(roomId).emit('bilibili-download-progress', {
-            stage: progress.stage,
-            progress: progress.progress,
-            message: progress.message,
-            speed: progress.speed || 0,       // 实时下载速度 (字节/秒)
-            avgSpeed: progress.avgSpeed || 0  // 平均下载速度 (字节/秒)
-          });
-        }
+        // 将 downloadAndMerge 的进度映射到 0-50%
+        const mappedProgress = Math.round(progress.progress * 0.5);
+        emitBilibiliProgress(progress.stage, mappedProgress, progress.message);
       }
     );
 
-    // 记录到房间的 B 站文件列表（用于清理）
-    if (roomId) {
-      const room = rooms.get(roomId);
-      if (room) {
-        room.bilibiliFiles.push(result.videoFilename, result.audioFilename);
+    emitBilibiliProgress('transcoding', 50, '开始 HLS 转码...');
+
+    // 阶段2: HLS 转码 (50-95%)
+    const hlsDir = path.join(uploadsDir, `hls_${uploadId}`);
+    fs.mkdirSync(hlsDir, { recursive: true });
+
+    // 获取视频时长
+    const duration = await getVideoDuration(mergedPath);
+    if (!duration || duration <= 0) {
+      throw new Error('无法获取视频时长');
+    }
+
+    console.log(`[B站下载] 视频时长: ${duration}s，开始 HLS 转码...`);
+
+    // 计算分片 (每 60 秒一个分片)
+    const SEGMENT_DURATION = 60;
+    const segmentCount = Math.ceil(duration / SEGMENT_DURATION);
+    const segmentPromises = [];
+
+    for (let i = 0; i < segmentCount; i++) {
+      const startTime = i * SEGMENT_DURATION;
+      const segDuration = Math.min(SEGMENT_DURATION, duration - startTime);
+
+      segmentPromises.push(
+        transcodeSegment({
+          inputPath: mergedPath,
+          hlsDir,
+          segmentIndex: i,
+          startTime,
+          duration: segDuration,
+          mapArgs: '-map 0:v:0 -map 0:a:0?'
+        }).then(result => {
+          // 更新进度 (50-90%)
+          const progress = 50 + Math.round(((i + 1) / segmentCount) * 40);
+          emitBilibiliProgress('transcoding', progress, `转码分片 ${i + 1}/${segmentCount}`);
+          return result;
+        })
+      );
+    }
+
+    // 等待所有分片转码完成
+    const segmentResults = await Promise.all(segmentPromises);
+
+    // 检查是否有失败的分片
+    const failedSegments = segmentResults.filter(r => !r.success);
+    if (failedSegments.length > 0) {
+      console.warn(`[B站下载] ${failedSegments.length} 个分片转码失败`);
+    }
+
+    emitBilibiliProgress('merging', 92, '合并播放列表...');
+
+    // 合并播放列表
+    mergeHlsPlaylists(hlsDir, segmentResults, []);
+
+    // 删除临时分片播放列表
+    for (const result of segmentResults) {
+      if (result.playlistPath && fs.existsSync(result.playlistPath)) {
+        fs.unlinkSync(result.playlistPath);
       }
     }
 
-    console.log(`[B站下载] 完成: video=${result.videoPath}, audio=${result.audioPath}`);
+    // 删除合并后的 mp4 文件
+    fs.unlink(mergedPath, () => { });
+
+    emitBilibiliProgress('complete', 100, '处理完成');
+
+    // 记录到房间的文件列表（用于清理）
+    if (roomId) {
+      const room = rooms.get(roomId);
+      if (room) {
+        room.bilibiliFiles.push(path.basename(hlsDir));
+      }
+    }
+
+    const hlsUrl = `/uploads/hls_${uploadId}/index.m3u8`;
+    console.log(`[B站下载] HLS 转码完成: ${hlsUrl}`);
 
     res.json({
       success: true,
       data: {
-        type: 'mse',  // 标记为 MSE 类型
-        videoUrl: result.videoPath,
-        audioUrl: result.audioPath,
-        codecs: result.codecs
+        type: 'hls',  // 改为 HLS 类型
+        url: hlsUrl
       }
     });
 

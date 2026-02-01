@@ -509,30 +509,34 @@ function updateBilibiliProgress(data) {
         progressPercent.textContent = `${data.progress}%`;
     }
 
-    // 生成友好消息
+    // 使用服务端发送的消息（包含下载速度）
     let friendlyMessage = data.message || '正在下载...';
     let titleText = '下载中...';
 
-    if (data.progress < 30) {
-        titleText = '获取视频流...';
-        friendlyMessage = '正在获取视频资源...';
-    } else if (data.progress < 80) {
-        titleText = '下载中...';
-        friendlyMessage = `正在下载视频 (${data.progress}%)`;
-    } else if (data.progress < 100) {
-        titleText = '即将完成...';
-        friendlyMessage = '正在处理视频数据...';
-    } else {
+    // 根据阶段设置标题
+    if (data.stage === 'fetching') {
+        titleText = '获取资源...';
+    } else if (data.stage === 'downloading_video') {
+        titleText = '下载视频...';
+    } else if (data.stage === 'downloading_audio') {
+        titleText = '下载音频...';
+    } else if (data.stage === 'merging') {
+        titleText = '合并中...';
+    } else if (data.stage === 'complete' || data.progress >= 100) {
         titleText = '准备播放';
         friendlyMessage = '下载完成，即将播放！';
         container.classList.add('complete');
         if (icon) icon.className = 'fa-solid fa-circle-check processing-icon-inner';
+    } else if (data.stage === 'error') {
+        titleText = '下载失败';
+        container.classList.add('error');
+        if (icon) icon.className = 'fa-solid fa-circle-xmark processing-icon-inner';
     }
 
     if (progressText) progressText.textContent = titleText;
     if (progressMessage) progressMessage.textContent = friendlyMessage;
 
-    console.log(`[B站下载] 进度已更新: ${data.progress}%`);
+    console.log(`[B站下载] 进度已更新: ${data.progress}% - ${friendlyMessage}`);
 }
 
 /**
@@ -1479,10 +1483,8 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         // 音频缓冲状态
         audioElement.addEventListener('waiting', () => {
             audioBuffering = true;
-            console.log('[MSE] 音频缓冲中，暂停视频');
-            if (!player.paused()) {
-                player.pause();
-            }
+            console.log('[MSE] 音频缓冲中...');
+            // 注意：不暂停视频，让视频继续播放。音频就绪后会自动同步
         });
 
         audioElement.addEventListener('canplay', () => {
@@ -3213,9 +3215,11 @@ async function playBilibiliVideo() {
         // 关闭弹窗
         closeBilibiliVideoModal();
 
-        // MSE 播放：传递分离的音视频 URL
-        if (result.data.type === 'mse') {
-            // 通知房间使用 MSE 播放
+        // B 站视频现在都通过 HLS 转码播放，与普通上传视频体验一致
+        if (result.data.type === 'hls') {
+            socket.emit('change-video', { url: result.data.url });
+        } else if (result.data.type === 'mse') {
+            // 兼容旧的 MSE 模式（已弃用）
             socket.emit('change-video', {
                 url: result.data.videoUrl,
                 mseData: {
@@ -3225,7 +3229,7 @@ async function playBilibiliVideo() {
                 }
             });
         } else {
-            // 普通视频播放
+            // 兜底：普通 URL 播放
             socket.emit('change-video', { url: result.data.url });
         }
 
