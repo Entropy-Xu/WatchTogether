@@ -28,6 +28,10 @@ class P2PLoader {
         // 是否启用 P2P
         this.enabled = true;
 
+        // Seek 优化：seek 后临时跳过 P2P
+        this.skipP2PUntil = 0;          // 跳过 P2P 的截止时间戳
+        this.seekSkipDuration = 2000;   // seek 后跳过 P2P 的时长 (2秒)
+
         // 绑定 socket 事件
         this._bindSocketEvents();
 
@@ -372,6 +376,11 @@ class P2PLoader {
     async getSegment(url) {
         if (!this.enabled) return null;
 
+        // Seek 优化：seek 后的短时间内跳过 P2P，直接走 HTTP
+        if (Date.now() < this.skipP2PUntil) {
+            return null;
+        }
+
         // 先检查本地缓存
         const cached = this.segmentCache.get(url);
         if (cached && Date.now() - cached.timestamp < this.cacheMaxAge) {
@@ -415,11 +424,10 @@ class P2PLoader {
                 }));
             };
 
-            // 设置超时
             const timeout = setTimeout(() => {
                 this.pendingRequests.delete(requestId);
                 resolve(null);
-            }, 3000); // 3 秒超时
+            }, 800); // 800ms 超时，快速 fallback 到 HTTP
 
             this.pendingRequests.set(requestId, {
                 resolve: (data) => {
@@ -501,6 +509,14 @@ class P2PLoader {
     setEnabled(enabled) {
         this.enabled = enabled;
         console.log(`[P2P] ${enabled ? '已启用' : '已禁用'}`);
+    }
+
+    /**
+     * 通知 P2P 发生了 seek，临时跳过 P2P 以加快首帧加载
+     */
+    onSeek() {
+        this.skipP2PUntil = Date.now() + this.seekSkipDuration;
+        console.log(`[P2P] Seek 检测，临时跳过 P2P ${this.seekSkipDuration}ms`);
     }
 }
 

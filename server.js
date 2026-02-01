@@ -334,6 +334,8 @@ async function transcodeSegment(opts) {
     `-ss ${startTimeStr} -t ${duration} -i "${inputPath}" ${mapArgs} ` +
     `-output_ts_offset ${startTime} ` +
     `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
+    `-g 48 -keyint_min 48 -sc_threshold 0 ` +  // 关键帧间隔约2秒，提高seek性能
+    `-force_key_frames "expr:gte(t,n_forced*2)" ` +  // 每2秒强制关键帧
     `-c:a aac -b:a 128k -ac 2 ` +
     `-f hls -hls_time 2 -hls_list_size 0 ` +
     `-hls_segment_type mpegts ` +
@@ -1121,7 +1123,9 @@ app.post('/api/bilibili/download', async (req, res) => {
           io.in(roomId).emit('bilibili-download-progress', {
             stage: progress.stage,
             progress: progress.progress,
-            message: progress.message
+            message: progress.message,
+            speed: progress.speed || 0,       // 实时下载速度 (字节/秒)
+            avgSpeed: progress.avgSpeed || 0  // 平均下载速度 (字节/秒)
           });
         }
       }
@@ -1395,6 +1399,8 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 
         const fallbackCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
           `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
+          `-g 48 -keyint_min 48 -sc_threshold 0 ` +
+          `-force_key_frames "expr:gte(t,n_forced*2)" ` +
           `-c:a aac -b:a 128k -ac 2 ` +
           `-f hls -hls_time 2 -hls_list_size 0 ` +
           `-hls_segment_type mpegts ` +

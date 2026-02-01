@@ -122,18 +122,33 @@ function downloadFile(url, outputPath, cookie = '', retries = 3, onProgress = nu
 
                 const totalSize = parseInt(res.headers['content-length'], 10) || 0;
                 let downloadedSize = 0;
-                let lastReportTime = 0;
+                let lastReportTime = Date.now();
+                let lastReportBytes = 0;
+                const startTime = Date.now();
 
                 res.on('data', (chunk) => {
                     downloadedSize += chunk.length;
                     // 每200ms最多报告一次进度，避免过于频繁
                     const now = Date.now();
                     if (onProgress && (now - lastReportTime > 200 || downloadedSize === totalSize)) {
+                        // 计算下载速度 (字节/秒)
+                        const timeDelta = (now - lastReportTime) / 1000; // 秒
+                        const bytesDelta = downloadedSize - lastReportBytes;
+                        const speed = timeDelta > 0 ? bytesDelta / timeDelta : 0;
+
+                        // 计算平均速度
+                        const totalTime = (now - startTime) / 1000;
+                        const avgSpeed = totalTime > 0 ? downloadedSize / totalTime : 0;
+
                         lastReportTime = now;
+                        lastReportBytes = downloadedSize;
+
                         onProgress({
                             downloaded: downloadedSize,
                             total: totalSize,
-                            percent: totalSize > 0 ? Math.round((downloadedSize / totalSize) * 100) : 0
+                            percent: totalSize > 0 ? Math.round((downloadedSize / totalSize) * 100) : 0,
+                            speed: speed,           // 实时速度 (字节/秒)
+                            avgSpeed: avgSpeed      // 平均速度 (字节/秒)
                         });
                     }
                 });
@@ -628,13 +643,23 @@ async function downloadSeparate(bvid, cid, qn, cookie, uploadsDir, onProgress = 
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         };
 
+        // 格式化速度
+        const formatSpeed = (bytesPerSecond) => {
+            if (bytesPerSecond < 1024) return bytesPerSecond.toFixed(0) + ' B/s';
+            if (bytesPerSecond < 1024 * 1024) return (bytesPerSecond / 1024).toFixed(1) + ' KB/s';
+            return (bytesPerSecond / (1024 * 1024)).toFixed(2) + ' MB/s';
+        };
+
         // 下载视频流
         await downloadFile(videoUrl, videoPath, cookie, 3, (p) => {
             const progress = 10 + Math.round(p.percent * 0.4); // 10% - 50%
+            const speedStr = p.speed ? formatSpeed(p.speed) : '';
             onProgress({
                 stage: 'downloading_video',
                 progress,
-                message: `下载视频流 ${formatSize(p.downloaded)} / ${formatSize(p.total)}`
+                message: `下载视频流 ${formatSize(p.downloaded)} / ${formatSize(p.total)}${speedStr ? ' @ ' + speedStr : ''}`,
+                speed: p.speed || 0,
+                avgSpeed: p.avgSpeed || 0
             });
         });
 
@@ -643,10 +668,13 @@ async function downloadSeparate(bvid, cid, qn, cookie, uploadsDir, onProgress = 
         // 下载音频流
         await downloadFile(audioUrl, audioPath, cookie, 3, (p) => {
             const progress = 55 + Math.round(p.percent * 0.4); // 55% - 95%
+            const speedStr = p.speed ? formatSpeed(p.speed) : '';
             onProgress({
                 stage: 'downloading_audio',
                 progress,
-                message: `下载音频流 ${formatSize(p.downloaded)} / ${formatSize(p.total)}`
+                message: `下载音频流 ${formatSize(p.downloaded)} / ${formatSize(p.total)}${speedStr ? ' @ ' + speedStr : ''}`,
+                speed: p.speed || 0,
+                avgSpeed: p.avgSpeed || 0
             });
         });
 

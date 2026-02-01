@@ -1207,6 +1207,10 @@ function initVideoPlayer() {
     player.on('seeked', () => {
         if (isSyncing) return;
         socket.emit('video-seek', { currentTime: player.currentTime() });
+        // 通知 P2P 加载器发生了 seek，临时跳过 P2P 加快首帧加载
+        if (p2pLoader) {
+            p2pLoader.onSeek();
+        }
     });
 
     player.on('error', () => {
@@ -1452,27 +1456,34 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         const hlsConfig = {
             enableWorker: true,
             lowLatencyMode: false,
-            // 增加缓冲以提高长视频稳定性
-            maxBufferLength: 60,              // 最大缓冲 60 秒（默认 30）
-            maxMaxBufferLength: 120,          // 极限缓冲 120 秒
-            maxBufferSize: 60 * 1000 * 1000,  // 60MB 缓冲区
+            // 缓冲设置 - 减少以加快 seek 后的首帧加载
+            maxBufferLength: 20,              // 最大缓冲 20 秒（减少等待）
+            maxMaxBufferLength: 60,           // 极限缓冲 60 秒
+            maxBufferSize: 30 * 1000 * 1000,  // 30MB 缓冲区
             maxBufferHole: 0.5,               // 允许的缓冲间隙
-            // 分片加载优化
-            fragLoadingRetryDelay: 1000,      // 分片加载重试延迟 1 秒
-            fragLoadingMaxRetry: 4,           // 最大重试次数
-            fragLoadingTimeOut: 20000,        // 分片加载超时 20 秒
-            levelLoadingRetryDelay: 1000,     // 级别加载重试延迟
+            // 分片加载优化 - 加快重试
+            fragLoadingRetryDelay: 500,       // 分片加载重试延迟 500ms
+            fragLoadingMaxRetry: 6,           // 最大重试次数
+            fragLoadingTimeOut: 15000,        // 分片加载超时 15 秒
+            levelLoadingRetryDelay: 500,      // 级别加载重试延迟
             levelLoadingMaxRetry: 4,          // 级别最大重试
             // 播放列表加载
-            manifestLoadingRetryDelay: 1000,
+            manifestLoadingRetryDelay: 500,
             manifestLoadingMaxRetry: 3,
+            manifestLoadingTimeOut: 10000,    // 清单超时 10 秒
             // 自适应码率
-            abrEwmaDefaultEstimate: 500000,   // 默认带宽估计 500kbps
+            abrEwmaDefaultEstimate: 1000000,  // 默认带宽估计 1Mbps（更乐观）
             startLevel: -1,                   // 自动选择起始级别
-            // 后向缓冲
-            backBufferLength: 30,             // 保留 30 秒已播内容
+            // 后向缓冲 - seek后清理旧缓冲
+            backBufferLength: 10,             // 只保留 10 秒已播内容
             // 自动错误恢复
-            enableSoftwareAES: true           // 启用软件 AES 解密
+            enableSoftwareAES: true,          // 启用软件 AES 解密
+            // === Seek 优化 (大范围跳转) ===
+            nudgeOffset: 0.1,                 // seek 时的微调偏移
+            nudgeMaxRetry: 5,                 // 最大微调重试次数
+            maxFragLookUpTolerance: 0.25,     // 分片查找容差
+            startFragPrefetch: true,          // 预加载起始分片
+            testBandwidth: false              // 跳过带宽测试，加快起播
         };
 
         // 如果启用了 P2P，添加自定义片段加载器
