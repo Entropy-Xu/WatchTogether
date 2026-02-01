@@ -1376,6 +1376,11 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         audioElement.preload = 'auto';
         window.currentMseAudio = audioElement;
 
+        // MSE 同步状态
+        let videoBuffering = false;
+        let audioBuffering = false;
+        let syncInterval = null;
+
         // 设置视频源
         player.src({
             src: mseData.videoUrl,
@@ -1384,20 +1389,42 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
 
         player.load();
 
-        // 同步音频与视频
+        // 同步音频与视频时间
         const syncAudioWithVideo = () => {
             if (!window.currentMseAudio) return;
 
-            // 同步时间 - 阈值从 0.3 降至 0.1 秒以提高精度
+            // 同步时间 - 0.1 秒阈值
             if (Math.abs(window.currentMseAudio.currentTime - player.currentTime()) > 0.1) {
                 window.currentMseAudio.currentTime = player.currentTime();
             }
         };
 
+        // 检查双方是否都准备好播放
+        const checkBothReady = () => {
+            if (!window.currentMseAudio) return false;
+            // readyState >= 3 表示有足够数据可以播放
+            const videoReady = player.readyState() >= 3;
+            const audioReady = window.currentMseAudio.readyState >= 3;
+            return videoReady && audioReady && !videoBuffering && !audioBuffering;
+        };
+
+        // 尝试同步播放
+        const tryPlayBoth = () => {
+            if (!window.currentMseAudio) return;
+
+            if (checkBothReady()) {
+                window.currentMseAudio.currentTime = player.currentTime();
+                window.currentMseAudio.play().catch(e => console.log('[MSE] 音频播放失败:', e));
+            } else {
+                // 等待双方都准备好
+                console.log('[MSE] 等待音视频就绪...');
+            }
+        };
+
+        // 视频事件
         player.on('play', () => {
             if (window.currentMseAudio) {
-                window.currentMseAudio.currentTime = player.currentTime();
-                window.currentMseAudio.play().catch(e => console.log('音频播放失败:', e));
+                tryPlayBoth();
             }
         });
 
@@ -1410,6 +1437,10 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         player.on('seeked', () => {
             if (window.currentMseAudio) {
                 window.currentMseAudio.currentTime = player.currentTime();
+                // 如果视频在播放，同步播放音频
+                if (!player.paused()) {
+                    tryPlayBoth();
+                }
             }
         });
 
@@ -1419,8 +1450,80 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
             }
         });
 
-        // 定期同步
+        // 视频缓冲状态
+        player.on('waiting', () => {
+            videoBuffering = true;
+            console.log('[MSE] 视频缓冲中，暂停音频');
+            if (window.currentMseAudio && !window.currentMseAudio.paused) {
+                window.currentMseAudio.pause();
+            }
+        });
+
+        player.on('canplay', () => {
+            videoBuffering = false;
+            console.log('[MSE] 视频就绪');
+            // 如果视频在播放且音频也准备好了，恢复音频
+            if (!player.paused() && checkBothReady()) {
+                tryPlayBoth();
+            }
+        });
+
+        player.on('playing', () => {
+            videoBuffering = false;
+            // 确保音频也在播放
+            if (window.currentMseAudio && window.currentMseAudio.paused && !player.paused()) {
+                tryPlayBoth();
+            }
+        });
+
+        // 音频缓冲状态
+        audioElement.addEventListener('waiting', () => {
+            audioBuffering = true;
+            console.log('[MSE] 音频缓冲中，暂停视频');
+            if (!player.paused()) {
+                player.pause();
+            }
+        });
+
+        audioElement.addEventListener('canplay', () => {
+            audioBuffering = false;
+            console.log('[MSE] 音频就绪');
+        });
+
+        audioElement.addEventListener('canplaythrough', () => {
+            audioBuffering = false;
+            // 如果之前因为音频缓冲而暂停了视频，现在恢复
+            if (checkBothReady() && player.paused() && !videoBuffering) {
+                console.log('[MSE] 音视频都就绪，尝试恢复播放');
+                // 注意：这里不自动播放，让用户控制
+            }
+        });
+
+        audioElement.addEventListener('error', (e) => {
+            console.error('[MSE] 音频加载错误:', e);
+        });
+
+        // 定期同步时间
         player.on('timeupdate', syncAudioWithVideo);
+
+        // 更频繁的同步检查（每500ms）
+        syncInterval = setInterval(() => {
+            if (!window.currentMseAudio) {
+                clearInterval(syncInterval);
+                return;
+            }
+
+            // 检查播放状态一致性
+            if (!player.paused() && window.currentMseAudio.paused && checkBothReady()) {
+                console.log('[MSE] 检测到音频意外暂停，尝试恢复');
+                tryPlayBoth();
+            } else if (player.paused() && !window.currentMseAudio.paused) {
+                window.currentMseAudio.pause();
+            }
+
+            // 同步时间
+            syncAudioWithVideo();
+        }, 500);
 
         player.one('loadedmetadata', () => {
             console.log('MSE 视频元数据已加载');
