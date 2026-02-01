@@ -117,7 +117,8 @@ class Room {
       allowAllChangeVideo: false,     // 是否允许所有人更换视频
       allowAllChangeSubtitle: false,  // 是否允许所有人更换字幕
       allowAllControl: true,          // 是否允许所有人控制播放
-      allowAllStream: false           // 是否允许所有人推流直播
+      allowAllStream: false,          // 是否允许所有人推流直播
+      waitForAll: false               // 是否等待所有人缓冲完成后再播放
     };
     // 跟踪 B 站下载的文件（用于清理）
     this.bilibiliFiles = [];
@@ -334,7 +335,7 @@ async function transcodeSegment(opts) {
     `-output_ts_offset ${startTime} ` +
     `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
     `-c:a aac -b:a 128k -ac 2 ` +
-    `-f hls -hls_time 4 -hls_list_size 0 ` +
+    `-f hls -hls_time 2 -hls_list_size 0 ` +
     `-hls_segment_type mpegts ` +
     `-hls_flags independent_segments ` +
     `-hls_segment_filename "${hlsDir}/${segmentPrefix}_%04d.ts" ` +
@@ -1395,7 +1396,7 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
         const fallbackCmd = `${ffmpegPath} -y -threads 0 -i "${originalPath}" ${mapArgs} ` +
           `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
           `-c:a aac -b:a 128k -ac 2 ` +
-          `-f hls -hls_time 4 -hls_list_size 0 ` +
+          `-f hls -hls_time 2 -hls_list_size 0 ` +
           `-hls_segment_type mpegts ` +
           `-hls_flags independent_segments ` +
           `-hls_segment_filename "${hlsDir}/seg_%04d.ts" ` +
@@ -1727,6 +1728,31 @@ io.on('connection', (socket) => {
       videoUrl: room.videoUrl,
       videoState: room.videoState
     });
+  });
+
+  // ============ 缓冲状态同步 ============
+
+  // 接收用户的缓冲状态并广播
+  socket.on('player-buffering', ({ isBuffering, currentTime }) => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+
+    // 更新用户的缓冲状态
+    const user = room.users.get(socket.id);
+    if (user) {
+      user.isBuffering = isBuffering;
+    }
+
+    // 广播给房间内其他用户
+    socket.to(currentRoom).emit('sync-buffering', {
+      userId: socket.id,
+      userName: currentUserName,
+      isBuffering,
+      currentTime
+    });
+
+    console.log(`[缓冲] ${currentUserName} 缓冲状态: ${isBuffering ? '缓冲中' : '已就绪'} @ ${currentTime.toFixed(1)}s`);
   });
 
   // 聊天消息

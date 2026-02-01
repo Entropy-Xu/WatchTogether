@@ -19,7 +19,8 @@ let roomSettings = {
     allowAllChangeVideo: false,
     allowAllChangeSubtitle: false,
     allowAllControl: true,
-    allowAllStream: false
+    allowAllStream: false,
+    waitForAll: false              // 是否等待所有人缓冲完成后再播放
 };
 
 // 直播推流状态
@@ -58,6 +59,16 @@ const BITRATE_LEVELS = [
 let currentBitrateLevel = 3;       // 当前码率级别索引 (默认高)
 let consecutiveGoodStats = 0;      // 连续良好统计次数
 let consecutiveBadStats = 0;       // 连续差统计次数
+
+// ==========================================
+// 缓冲状态同步
+// ==========================================
+let isBuffering = false;           // 本地是否正在缓冲
+let bufferingTimeout = null;       // 缓冲状态防抖定时器
+let bufferingUsers = new Map();    // 其他用户的缓冲状态 userId -> { userName, isBuffering }
+let pausedForBuffering = false;    // 是否因等待缓冲而暂停
+const BUFFERING_SYNC_DELAY = 500;  // 500ms 延迟防抖，避免短暂缓冲频繁触发
+
 
 const rtcConfig = {
     iceServers: [
@@ -171,6 +182,97 @@ function updatePlayerControls() {
     }
 
     console.log(`[Permission] 更新权限控制: isHost=${isHost}, allowControl=${roomSettings.allowAllControl} => disabled=${!canControl}`);
+}
+
+// ==========================================
+// 缓冲状态同步函数
+// ==========================================
+
+/**
+ * 监听播放器缓冲开始（waiting 事件）
+ */
+function onPlayerWaiting() {
+    if (isBuffering) return;
+    isBuffering = true;
+
+    // 延迟发送，避免短暂缓冲频繁触发
+    bufferingTimeout = setTimeout(() => {
+        if (socket && socket.connected) {
+            socket.emit('player-buffering', {
+                isBuffering: true,
+                currentTime: player ? player.currentTime() : 0
+            });
+        }
+        updateSyncStatus('buffering', '缓冲中...');
+        console.log('[缓冲] 开始缓冲');
+    }, BUFFERING_SYNC_DELAY);
+}
+
+/**
+ * 监听播放器缓冲结束（canplay/playing 事件）
+ */
+function onPlayerCanPlay() {
+    if (!isBuffering) return;
+    isBuffering = false;
+
+    if (bufferingTimeout) {
+        clearTimeout(bufferingTimeout);
+        bufferingTimeout = null;
+    }
+
+    if (socket && socket.connected) {
+        socket.emit('player-buffering', {
+            isBuffering: false,
+            currentTime: player ? player.currentTime() : 0
+        });
+    }
+    updateSyncStatus('', '已同步');
+    console.log('[缓冲] 缓冲结束');
+
+    // 如果之前因等待而暂停，检查是否可以恢复
+    if (pausedForBuffering && roomSettings.waitForAll) {
+        checkAllUsersReady();
+    }
+}
+
+/**
+ * 检查所有用户是否都已缓冲完成，如果是则恢复播放
+ */
+function checkAllUsersReady() {
+    // 检查是否有任何用户还在缓冲
+    let anyBuffering = false;
+    bufferingUsers.forEach((user) => {
+        if (user.isBuffering) {
+            anyBuffering = true;
+        }
+    });
+
+    if (!anyBuffering && pausedForBuffering && player) {
+        pausedForBuffering = false;
+        isSyncing = true;
+        player.play().catch(e => console.log('恢复播放失败:', e));
+        setTimeout(() => { isSyncing = false; }, 500);
+        showToast('所有用户已就绪，继续播放', 'success');
+        console.log('[缓冲] 所有用户已就绪，恢复播放');
+    }
+}
+
+/**
+ * 更新缓冲状态显示
+ */
+function updateBufferingStatusUI() {
+    const bufferingList = [];
+    bufferingUsers.forEach((user, id) => {
+        if (user.isBuffering) {
+            bufferingList.push(user.userName);
+        }
+    });
+
+    if (bufferingList.length > 0) {
+        updateSyncStatus('buffering', `等待: ${bufferingList.join(', ')}`);
+    } else if (!isBuffering) {
+        updateSyncStatus('', '已同步');
+    }
 }
 
 // ==========================================
@@ -730,7 +832,7 @@ function initSocket() {
         updateSyncStatus('syncing', '同步中...');
 
         const timeDiff = Math.abs(player.currentTime() - currentTime);
-        if (timeDiff > 1) {
+        if (timeDiff > 0.5) { // 降低阈值以提高同步精度
             player.currentTime(currentTime);
         }
         player.play();
@@ -876,6 +978,58 @@ function initSocket() {
     // 权限被拒绝
     socket.on('permission-denied', ({ action, message }) => {
         showToast(message || '权限不足', 'error');
+    });
+
+    // ==========================================
+    // 缓冲状态同步事件
+    // ==========================================
+
+    // 接收其他用户的缓冲状态
+    socket.on('sync-buffering', ({ userId, userName: bufferingUser, isBuffering: userBuffering, currentTime: bufferingTime }) => {
+        if (userId === socket.id) return; // 忽略自己的消息
+
+        // 更新用户缓冲状态
+        bufferingUsers.set(userId, {
+            userName: bufferingUser,
+            isBuffering: userBuffering
+        });
+
+        console.log(`[缓冲同步] ${bufferingUser} ${userBuffering ? '开始缓冲' : '缓冲完成'}`);
+
+        if (userBuffering) {
+            // 其他用户正在缓冲
+            showToast(`${bufferingUser} 正在缓冲...`, 'info');
+            updateBufferingStatusUI();
+
+            // 如果启用了"等待所有人"，暂停播放
+            if (roomSettings.waitForAll && player && !player.paused()) {
+                pausedForBuffering = true;
+                isSyncing = true;
+                player.pause();
+                setTimeout(() => { isSyncing = false; }, 500);
+                showToast('等待其他用户缓冲完成...', 'info');
+                console.log('[缓冲同步] 暂停等待其他用户');
+            }
+        } else {
+            // 用户缓冲结束
+            updateBufferingStatusUI();
+
+            // 检查是否所有人都就绪
+            if (roomSettings.waitForAll && pausedForBuffering) {
+                checkAllUsersReady();
+            }
+        }
+    });
+
+    // 用户离开时清理其缓冲状态
+    socket.on('user-left', ({ userId }) => {
+        bufferingUsers.delete(userId);
+        updateBufferingStatusUI();
+
+        // 如果正在等待该用户，检查是否可以恢复
+        if (pausedForBuffering) {
+            checkAllUsersReady();
+        }
     });
 }
 
@@ -1059,6 +1213,12 @@ function initVideoPlayer() {
         showToast('视频加载失败，请检查链接是否有效', 'error');
     });
 
+    // 缓冲状态监听 - 用于同步
+    player.on('waiting', onPlayerWaiting);
+    player.on('canplay', onPlayerCanPlay);
+    player.on('playing', onPlayerCanPlay);
+    player.on('stalled', onPlayerWaiting);
+
     // 修复：将弹幕容器移动到 Video.js 容器内，以便全屏时显示
     const dmContainer = document.getElementById('danmaku-container');
     if (dmContainer) {
@@ -1224,8 +1384,8 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
         const syncAudioWithVideo = () => {
             if (!window.currentMseAudio) return;
 
-            // 同步时间
-            if (Math.abs(window.currentMseAudio.currentTime - player.currentTime()) > 0.3) {
+            // 同步时间 - 阈值从 0.3 降至 0.1 秒以提高精度
+            if (Math.abs(window.currentMseAudio.currentTime - player.currentTime()) > 0.1) {
                 window.currentMseAudio.currentTime = player.currentTime();
             }
         };
@@ -1288,10 +1448,31 @@ function loadVideo(url, mseDataOrStartTime = null, autoPlay = false) {
 
         const videoElement = player.tech({ IWillNotUseThisInPlugins: true }).el();
 
-        // 配置 HLS.js，集成 P2P 加载
+        // 配置 HLS.js，集成 P2P 加载，优化长视频播放
         const hlsConfig = {
             enableWorker: true,
-            lowLatencyMode: false
+            lowLatencyMode: false,
+            // 增加缓冲以提高长视频稳定性
+            maxBufferLength: 60,              // 最大缓冲 60 秒（默认 30）
+            maxMaxBufferLength: 120,          // 极限缓冲 120 秒
+            maxBufferSize: 60 * 1000 * 1000,  // 60MB 缓冲区
+            maxBufferHole: 0.5,               // 允许的缓冲间隙
+            // 分片加载优化
+            fragLoadingRetryDelay: 1000,      // 分片加载重试延迟 1 秒
+            fragLoadingMaxRetry: 4,           // 最大重试次数
+            fragLoadingTimeOut: 20000,        // 分片加载超时 20 秒
+            levelLoadingRetryDelay: 1000,     // 级别加载重试延迟
+            levelLoadingMaxRetry: 4,          // 级别最大重试
+            // 播放列表加载
+            manifestLoadingRetryDelay: 1000,
+            manifestLoadingMaxRetry: 3,
+            // 自适应码率
+            abrEwmaDefaultEstimate: 500000,   // 默认带宽估计 500kbps
+            startLevel: -1,                   // 自动选择起始级别
+            // 后向缓冲
+            backBufferLength: 30,             // 保留 30 秒已播内容
+            // 自动错误恢复
+            enableSoftwareAES: true           // 启用软件 AES 解密
         };
 
         // 如果启用了 P2P，添加自定义片段加载器
@@ -1924,6 +2105,8 @@ function updateSettingsUI() {
     document.getElementById('allow-control-switch').checked = roomSettings.allowAllControl;
     const streamSwitch = document.getElementById('allow-stream-switch');
     if (streamSwitch) streamSwitch.checked = roomSettings.allowAllStream || false;
+    const waitForAllSwitch = document.getElementById('wait-for-all-switch');
+    if (waitForAllSwitch) waitForAllSwitch.checked = roomSettings.waitForAll || false;
 }
 
 // 复制邀请链接
@@ -1959,11 +2142,13 @@ function hideSettingsModal() {
 // 保存房间设置
 function saveRoomSettings() {
     const streamSwitch = document.getElementById('allow-stream-switch');
+    const waitForAllSwitch = document.getElementById('wait-for-all-switch');
     const settings = {
         allowAllChangeVideo: document.getElementById('allow-video-switch').checked,
         allowAllChangeSubtitle: document.getElementById('allow-subtitle-switch').checked,
         allowAllControl: document.getElementById('allow-control-switch').checked,
-        allowAllStream: streamSwitch ? streamSwitch.checked : false
+        allowAllStream: streamSwitch ? streamSwitch.checked : false,
+        waitForAll: waitForAllSwitch ? waitForAllSwitch.checked : false
     };
 
     socket.emit('update-settings', { settings }, (response) => {
