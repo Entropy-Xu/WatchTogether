@@ -319,24 +319,85 @@ async function getAudioStreams(filePath) {
 }
 
 /**
- * 转码单个分片
+ * 获取视频编码格式
+ */
+async function getVideoCodec(filePath) {
+  const cmd = `${ffprobePath} -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "${filePath}"`;
+  try {
+    const { stdout } = await execAsync(cmd);
+    return stdout.trim();
+  } catch (err) {
+    console.error('获取视频编码失败:', err.message);
+    return 'unknown';
+  }
+}
+
+/**
+ * 获取音频编码格式
+ */
+async function getAudioCodec(filePath) {
+  const cmd = `${ffprobePath} -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "${filePath}"`;
+  try {
+    const { stdout } = await execAsync(cmd);
+    return stdout.trim();
+  } catch (err) {
+    console.error('获取音频编码失败:', err.message);
+    return 'unknown';
+  }
+}
+
+/**
+ * 检测是否可以使用 stream copy (无需重新编码)
+ */
+async function canUseStreamCopy(filePath) {
+  const [videoCodec, audioCodec] = await Promise.all([
+    getVideoCodec(filePath),
+    getAudioCodec(filePath)
+  ]);
+
+  // H.264/HEVC + AAC 可以直接复制到 HLS
+  const videoOk = ['h264', 'hevc'].includes(videoCodec.toLowerCase());
+  const audioOk = ['aac', 'mp3'].includes(audioCodec.toLowerCase());
+
+  console.log(`[编码检测] 视频: ${videoCodec}, 音频: ${audioCodec}, 可 stream copy: ${videoOk && audioOk}`);
+
+  return {
+    canCopy: videoOk && audioOk,
+    videoCodec,
+    audioCodec
+  };
+}
+
+/**
+ * 转码单个分片 (支持 stream copy 模式)
  * @param {Object} opts - 转码选项
  * @returns {Promise<{success: boolean, segmentIndex: number, tsFiles: string[]}>}
  */
 async function transcodeSegment(opts) {
-  const { inputPath, hlsDir, segmentIndex, startTime, duration, mapArgs } = opts;
+  const { inputPath, hlsDir, segmentIndex, startTime, duration, mapArgs, useStreamCopy = false } = opts;
 
   const startTimeStr = formatTime(startTime);
   const segmentPrefix = `seg_${segmentIndex}`;
   const playlistPath = path.join(hlsDir, `stream_${segmentIndex}.m3u8`);
 
+  // 根据是否使用 stream copy 选择编码参数
+  let codecArgs;
+  if (useStreamCopy) {
+    // Stream copy: 直接复制流，不重新编码 (极快)
+    codecArgs = `-c:v copy -c:a copy`;
+    console.log(`[分片 ${segmentIndex}] 使用 stream copy 模式`);
+  } else {
+    // 重新编码: 使用 ultrafast 预设 (比原来的 veryfast 更快)
+    codecArgs = `-c:v libx264 -preset ultrafast -crf 23 ` +
+      `-g 48 -keyint_min 48 -sc_threshold 0 ` +
+      `-force_key_frames "expr:gte(t,n_forced*2)" ` +
+      `-c:a aac -b:a 128k -ac 2`;
+  }
+
   const ffmpegCmd = `${ffmpegPath} -y -threads 0 ` +
     `-ss ${startTimeStr} -t ${duration} -i "${inputPath}" ${mapArgs} ` +
     `-output_ts_offset ${startTime} ` +
-    `-c:v libx264 -preset veryfast -tune film -crf 23 ` +
-    `-g 48 -keyint_min 48 -sc_threshold 0 ` +  // 关键帧间隔约2秒，提高seek性能
-    `-force_key_frames "expr:gte(t,n_forced*2)" ` +  // 每2秒强制关键帧
-    `-c:a aac -b:a 128k -ac 2 ` +
+    `${codecArgs} ` +
     `-f hls -hls_time 2 -hls_list_size 0 ` +
     `-hls_segment_type mpegts ` +
     `-hls_flags independent_segments ` +
@@ -1097,9 +1158,9 @@ app.post('/api/bilibili/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// 下载 B 站视频 (合并后 HLS 转码，优化 seek 性能)
+// 下载 B 站视频 (支持直接播放模式和 HLS 模式)
 app.post('/api/bilibili/download', async (req, res) => {
-  const { bvid, cid, qn, roomId } = req.body;
+  const { bvid, cid, qn, roomId, mode = 'direct' } = req.body;
 
   if (!bvid || !cid) {
     return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' });
@@ -1109,7 +1170,7 @@ app.post('/api/bilibili/download', async (req, res) => {
     const cookie = roomId ? bilibili.getCookie(roomId) : '';
     const uploadId = `bilibili_${bvid}_${Date.now()}`;
 
-    console.log(`[B站下载] 开始处理: ${bvid}, cid: ${cid}, qn: ${qn || 80}`);
+    console.log(`[B站下载] 开始处理: ${bvid}, cid: ${cid}, qn: ${qn || 80}, mode: ${mode}`);
 
     // 进度推送函数
     const emitBilibiliProgress = (stage, progress, message) => {
@@ -1123,6 +1184,42 @@ app.post('/api/bilibili/download', async (req, res) => {
       }
     };
 
+    // ========== 直接播放模式 (无需转码，最快) ==========
+    if (mode === 'direct') {
+      const result = await bilibili.downloadSeparate(
+        bvid,
+        parseInt(cid),
+        parseInt(qn) || 80,
+        cookie,
+        uploadsDir,
+        (progress) => {
+          emitBilibiliProgress(progress.stage, progress.progress, progress.message);
+        }
+      );
+
+      // 记录到房间的文件列表（用于清理）
+      if (roomId) {
+        const room = rooms.get(roomId);
+        if (room) {
+          if (!room.bilibiliFiles) room.bilibiliFiles = [];
+          room.bilibiliFiles.push(result.videoFilename, result.audioFilename);
+        }
+      }
+
+      console.log(`[B站下载] 直接播放模式完成: ${result.videoPath}`);
+
+      return res.json({
+        success: true,
+        data: {
+          type: 'mse',
+          videoUrl: result.videoPath,
+          audioUrl: result.audioPath,
+          codecs: result.codecs
+        }
+      });
+    }
+
+    // ========== HLS 模式 (需要转码，保留作为备选) ==========
     // 阶段1: 下载并合并 (0-50%)
     const mergedPath = await bilibili.downloadAndMerge(
       bvid,
@@ -1167,11 +1264,12 @@ app.post('/api/bilibili/download', async (req, res) => {
           segmentIndex: i,
           startTime,
           duration: segDuration,
-          mapArgs: '-map 0:v:0 -map 0:a:0?'
+          mapArgs: '-map 0:v:0 -map 0:a:0?',
+          useStreamCopy: true  // B站视频始终是 H.264+AAC，可以直接复制
         }).then(result => {
           // 更新进度 (50-90%)
           const progress = 50 + Math.round(((i + 1) / segmentCount) * 40);
-          emitBilibiliProgress('transcoding', progress, `转码分片 ${i + 1}/${segmentCount}`);
+          emitBilibiliProgress('transcoding', progress, `快速处理 ${i + 1}/${segmentCount}`);
           return result;
         })
       );
@@ -1336,6 +1434,19 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
           throw new Error('无法获取视频时长');
         }
 
+        // 1.5. 检测编码，决定是否使用 stream copy
+        const codecInfo = await canUseStreamCopy(originalPath);
+        const useStreamCopy = codecInfo.canCopy;
+
+        emitProgress(uploadId, {
+          filename: originalName,
+          stage: 'analyzing',
+          progress: 12,
+          message: useStreamCopy
+            ? `✓ 检测到 ${codecInfo.videoCodec}/${codecInfo.audioCodec}，使用快速模式`
+            : `检测到 ${codecInfo.videoCodec}/${codecInfo.audioCodec}，需要转码`
+        });
+
         // 2. 计算分片
         const numSegments = Math.ceil(duration / SEGMENT_DURATION);
         const segments = [];
@@ -1346,13 +1457,13 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
           segments.push({ index: i, startTime, duration: segDuration });
         }
 
-        console.log(`分片计划: ${numSegments} 个分片, 并行度: ${Math.min(numSegments, MAX_PARALLEL_WORKERS)}`);
+        console.log(`分片计划: ${numSegments} 个分片, 并行度: ${Math.min(numSegments, MAX_PARALLEL_WORKERS)}, stream copy: ${useStreamCopy}`);
 
         emitProgress(uploadId, {
           filename: originalName,
           stage: 'transcoding',
           progress: 15,
-          message: `分片计划: ${numSegments} 个分片`,
+          message: useStreamCopy ? `快速处理: ${numSegments} 个分片` : `转码处理: ${numSegments} 个分片`,
           segmentInfo: { current: 0, total: numSegments, completed: 0 }
         });
 
@@ -1375,7 +1486,8 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
               segmentIndex: seg.index,
               startTime: seg.startTime,
               duration: seg.duration,
-              mapArgs
+              mapArgs,
+              useStreamCopy  // 传递编码检测结果
             }).then(result => {
               // 每个分片完成后更新进度
               completedSegments++;
@@ -1384,7 +1496,9 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
                 filename: originalName,
                 stage: 'transcoding',
                 progress,
-                message: `转码分片 ${completedSegments}/${numSegments}`,
+                message: useStreamCopy
+                  ? `快速处理 ${completedSegments}/${numSegments}`
+                  : `转码分片 ${completedSegments}/${numSegments}`,
                 segmentInfo: { current: seg.index + 1, total: numSegments, completed: completedSegments }
               });
               return result;
